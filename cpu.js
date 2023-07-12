@@ -385,6 +385,7 @@ class CPU{
                         this.acc <<= 1;
                         this.set_flag(CPU.Z_FLAG, !this.acc);
                         this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+                        this.prg_counter += data.bytes_used + 1;
                         return;
                     }
                     // Otherwise shift memory
@@ -394,6 +395,7 @@ class CPU{
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
                     MMAP.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x1: // ROL
                     // Immediate addressing mode not allowed
@@ -405,6 +407,7 @@ class CPU{
                         this.set_flag(CPU.C_FLAG,  high_bit);
                         this.set_flag(CPU.Z_FLAG, !this.acc);
                         this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+                        this.prg_counter += data.bytes_used + 1;
                         return;
                     }
                     let val = MMAP.get_byte(data.addr);
@@ -413,6 +416,7 @@ class CPU{
                     this.set_flag(CPU.C_FLAG,  high_bit);
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x2: // LSR
                     // Immediate addressing mode not allowed
@@ -424,6 +428,7 @@ class CPU{
                         this.set_flag(CPU.Z_FLAG, !this.acc);
                         // N flag will always be 0 after right shift
                         this.set_flag(CPU.N_FLAG,  0);
+                        this.prg_counter += data.bytes_used + 1;
                         return;
                     }
                     let val = MMAP.get_byte(data.addr);
@@ -432,6 +437,7 @@ class CPU{
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.set_flag(CPU.N_FLAG,  0);
                     MMAP.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x3: // ROR
                     // Immediate addressing mode not allowed
@@ -443,6 +449,7 @@ class CPU{
                         this.set_flag(CPU.C_FLAG,  low_bit);
                         this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
                         this.set_flag(CPU.Z_FLAG, !this.acc);
+                        this.prg_counter += data.bytes_used + 1;
                         return;
                     }
                     let val = MMAP.get_byte(data.addr);
@@ -452,6 +459,7 @@ class CPU{
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
                     MMAP.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 // These four next instruction don't support accumulator
                 // mode so no need to worry about that exception
@@ -464,6 +472,7 @@ class CPU{
                     // addr8, X becomes addr8, Y with this instruction
                     else if (op_addr_mode == 0x5) data = this.indexed_zp_y();
                     MMAP.set_byte(data.addr, this.x_reg);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x5: // LDX
                     // Accumulator addressing mode not allowed
@@ -475,6 +484,7 @@ class CPU{
                     this.x_reg = MMAP.get_byte(data.addr);
                     this.set_flag(CPU.Z_FLAG, !this.x_reg);
                     this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x6: // DEC
                     // Immediate and accumulator addressing modes not allowed
@@ -485,6 +495,7 @@ class CPU{
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
                     MMAP.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x7: // INC
                     // Immediate and accumulator addressing modes not allowed
@@ -495,6 +506,7 @@ class CPU{
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
                     MMAP.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
             }
         }
@@ -517,6 +529,7 @@ class CPU{
                     this.set_flag(CPU.V_FLAG, val & 0x40);
                     // This one I'm sure of though
                     this.set_flag(CPU.Z_FLAG, !(val & this.acc));
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x4: // STY
                     // Immediate and absolute indexed addressing modes
@@ -524,11 +537,13 @@ class CPU{
                     if ((op_addr_mode == 0x0)
                       ||(op_addr_mode == 0x7)) return null;
                     MMAP.set_byte(data.addr, this.y_reg);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x5: // LDY
                     this.y_reg = MMAP.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.y_reg);
+                    this.prg_counter += data.bytes_used + 1;
                     return;
                 case 0x6: // CPY
                     // Zero page indexed, absolute indexed addressing
