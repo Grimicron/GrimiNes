@@ -3,6 +3,7 @@
 // https://www.cpu-world.com/Arch/650x.html
 // https://www.pagetable.com/c64ref/6502/?tab=2#
 // https://www.nesdev.org/wiki/CPU_ALL
+// https://www.nesdev.org/wiki/CPU_interrupts
 
 // IMPORTANT NOTE TO SELF:
 // Even though the MOS6502/Ricoh2A03 are little-endian, the opcode identifier
@@ -12,33 +13,44 @@ class CPU{
     static C_FLAG = 0x0;
     static Z_FLAG = 0x1;
     static I_FLAG = 0x2;
+    // Pretty sure this does nothing whether it's set or not
+    // since the Ricoh2A03 literally doesn't have a BCD mode
+    // but it doesn't hurt to implement it (not BCD mode, just
+    // setting and clearing the flag)
     static D_FLAG = 0x3;
-    static B_FLAG = 0x4;
     // Bits 5 and 4 literally do nothing
     // Bit 5 is physically always set to HIGH (1) in the original CPU
     // Bit 4 (B_FLAG) is set when an interrupt is called depending on the type of
     // interrupt before it's pushed on the stack, but then it's just
     // discarded when restored (?)
+    static B_FLAG = 0x4;
     static V_FLAG = 0x6;
     static N_FLAG = 0x7;
-
+    
     constructor(){
         this.acc         = 0x00;
         this.x_reg       = 0x00;
         this.y_reg       = 0x00;
         this.proc_status = 0x34;
-        this.stack_ptr   = 0x01FF;
+        // Stack pointer is actually an 8bit register
+        // but the stack is located in 0x0100 - 0x01FF
+        // so we need to offset it by 0x0100 when we use it
+        this.stack_ptr   = 0xFF;
         this.prg_counter = 0x0000;
     }
 
     push(val){
-        MMAP.set_byte(this.stack_ptr, val);
-        this.stack_ptr--;
+        MMAP.set_byte(0x0100 + this.stack_ptr, val);
+        // Since the MOS 6502 was so cheap, the stack
+        // pointer didn't have logic to handle overflow
+        // or underflow, as such, it wraps around
+        this.stack_ptr = (this.stack_ptr - 1) & 0xFF;
     }
 
     pop(){
-        let val = MMAP.get_byte(this.stack_ptr);
-        this.stack_ptr++;
+        let val = MMAP.get_byte(0x0100 + this.stack_ptr+1);
+        // Reason for this stated above
+        this.stack_ptr = (this.stack_ptr + 1) & 0xFF;
         return val;
     }
 
@@ -227,63 +239,164 @@ class CPU{
         // Check for all the single byte instructions since they don't really
         // fit any pattern
         if (opcode == 0x00){ // BRK
+            // Read docs as to why this happens
+            this.prg_counter += 2;
+            // Push high PC
+            this.push((this.prg_counter & 0xFF00) >>> 8);
+            // Push low PC
+            this.push((this.prg_counter & 0x00FF) >>> 0);
+            // Push proc status with B_FLAG set for some goddamn reason???
+            this.set_flag(B_FLAG, 1);
+            this.push(this.proc_status);
+            // Again, I guess this is how it's done???
+            // Interrupts are confusing as hell
+            this.set_flag(I_FLAG, 1);
+            this.prg_counter = (MMAP.get_byte(0xFFFF) << 8) | MMAP.get_byte(0xFFFE);
             return;
         }
         if (opcode == 0x40){ // RTI
+            this.proc_status = this.pop();
+            // Make sure order of operations doesn't mess us up
+            this.prg_counter = 0x0000;
+            this.prg_counter |= this.pop();
+            this.prg_counter |= this.pop() << 8;
             return;
         }
         if (opcode == 0x60){ // RTS
+            // Make sure order of operations doesn't mess up
+            this.prg_counter = 0x0000;
+            this.prg_counter |= this.pop();
+            this.prg_counter |= this.pop();
+            // Read docs as to why this happens
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x08){ // PHP
+            this.push(this.proc_status);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x28){ // PLP
+            this.proc_status = this.pop();
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x48){ // PHA
+            this.push(this.acc);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x68){ // PLA
+            this.acc = this.pop();
+            this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.acc);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x88){ // DEY
+            this.y_reg = (this.y_reg - 1) & 0xFF;
+            this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.y_reg);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0xA8){ // TAY
+            this.y_reg = this.acc;
+            this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.y_reg);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0xC8){ // INY
+            this.y_reg = (this.y_reg + 1) & 0xFF;
+            this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.y_reg);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0xE8){ // INX
+            this.x_reg = (this.x_reg + 1) & 0xFF;
+            this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.x_reg);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x18){ // CLC
+            this.set_flag(CPU.C_FLAG, 0);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x38){ // SEC
+            this.set_flag(CPU.C_FLAG, 1);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x58){ // CLI
+            this.set_flag(CPU.I_FLAG, 0);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x78){ // SEI
+            this.set_flag(CPU.I_FLAG, 1);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x98){ // TYA
+            this.acc = this.y_reg;
+            this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.acc);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0xB8){ // CLV
+            this.set_flag(CPU.V_FLAG, 0);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0xD8){ // CLD
+            this.set_flag(CPU.D_FLAG, 0);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0xF8){ // SED
+            this.set_flag(CPU.D_FLAG, 1);
+            this.prg_counter++;
             return;
         }
         if (opcode == 0x8A){ // TXA
+            this.acc = this.x_reg;
+            this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.acc);
+            this.prg_counter++;
+            return;
+        }
+        if (opcode == 0x9A){ // TSX
+            this.x_reg = this.stack_ptr;
+            this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.x_reg);
+            this.prg_counter++;
+            return;
+        }
+        if (opcode == 0xAA){ // TAX
+            this.x_reg = this.acc;
+            this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.x_reg);
+            this.prg_counter++;
+            return;
+        }
+        if (opcode == 0xBA){ // TSX
+            this.stack_ptr = this.x_reg;
+            this.prg_counter++;
+            return;
+        }
+        if (opcode == 0xCA){ // DEX
+            this.x_reg = (this.x_reg - 1) & 0xFF;
+            this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.x_reg);
+            return;
+        }
+        if (opcode == 0xEA){ // NOP
+            // Lmao what do you want me to do bruhhhhhh
             return;
         }
         // Check for JMP instruction (since it's a bit iffy when you try
