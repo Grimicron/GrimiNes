@@ -31,6 +31,17 @@ class CPU{
         this.prg_counter = 0x0000;
     }
 
+    push(val){
+        MMAP.set_byte(this.stack_ptr, val);
+        this.stack_ptr--;
+    }
+
+    pop(){
+        let val = MMAP.get_byte(this.stack_ptr);
+        this.stack_ptr++;
+        return val;
+    }
+
     get_flag(pos){
         return (this.proc_status & (1<<pos)) >> pos;
     }
@@ -136,11 +147,20 @@ class CPU{
         let zp_ptr = MMAP.get_byte(this.prg_counter+1);
         // Retrieve said pointer
         let true_ptr = (MMAP.get_byte(zp_ptr + 1) << 8) | MMAP.get_byte(zp_ptr);
-        // Add contents of y_reg to it and retrieve data in resulter pointer
+        // Add contents of y_reg to get final pointer
         // (I'm ignoring the carry but I'm not quite sure if that's necessary
         // or if it's different)
         let indexed_ptr = (true_ptr + this.y_reg) & 0x0FFFF;
         return {bytes_used: 1, addr: indexed_ptr};
+    }
+
+    absolute_indirect(){ // (addr16)
+        // Second and third bytes of instruction point to a location
+        // in memory where a 16bit pointer is located which points to
+        // the data
+        let indirect_ptr = (MMAP.get_byte(this.prg_counter+2) << 8) | MMAP.get_byte(this.prg_counter+1);
+        let true_ptr =     (MMAP.get_byte(indirect_ptr+1)     << 8) | MMAP.get_byte(indirect_ptr);
+        return {bytes_used: 2, addr: true_ptr};
     }
 
     group_get_data(addr_mode, group){
@@ -269,33 +289,49 @@ class CPU{
         // Check for JMP instruction (since it's a bit iffy when you try
         // to fit it with the other groups)
         if (opcode == 0x4C){ // JMP (Absolute)
+            let data = this.absolute();
+            this.prg_counter = data.addr;
             return;
         }
         if (opcode == 0x6C){ // JMP (Absolute Indirect)
+            let data = this.absolute_indirect();
+            this.prg_counter = data.addr;
             return;
         }
         // Check for branch instructions. They are formatted so that
         // they're XXY10000, where XX indicates the flag to check and
         // Y represents the value to check it against
         if ((opcode & 0x1F) == 0x10){
+            // This system massively simplifies the code for all the branches
+            // but it may be the case that some subtleties break or something
             let flag_id  = (opcode & 0xC0) >> 6;
             let flag_val = (opcode & 0x20) >> 5;
-            if (flag_val == 0x00){ // BPL / BMI
+            let flag = null;
+            if      (flag_id == 0x0) flag = CPU.N_FLAG; // BPL / BMI
+            else if (flag_id == 0x1) flag = CPU.V_FLAG; // BVC / BVS
+            else if (flag_id == 0x2) flag = CPU.C_FLAG; // BCC / BCS
+            else if (flag_id == 0x3) flag = CPU.Z_FLAG; // BNE / BEQ
+            // Flag not recognised (somehow???)
+            if (flag == null) return null;
+            let data = this.relative().addr;
+            if (this.get_flag(flag) == flag_val){
+                this.prg_counter = data.addr;
                 return;
             }
-            if (flag_val == 0x01){ // BVC / BVS
-                return;
-            }
-            if (flag_val == 0x10){ // BCC / BCS
-                return;
-            }
-            if (flag_val == 0x11){ // BNE / BEQ
-                return;
-            }
+            this.prg_counter += data.bytes_used + 1;
+            return;
         }
         // Check for JSR since it's the only addressing instruction which
         // doesn't fit the AAABBBCC pattern
         if (opcode == 0x20){    // JSR
+            let new_addr = absolute().addr;
+            // Check docs as to why this is done
+            this.prg_counter += 2;
+            // Push high PC
+            this.push((this.prg_counter & 0xFF00) >>> 8);
+            // Push low PC
+            this.push((this.prg_counter & 0x00FF) >>> 0);
+            this.prg_counter = new_addr;
             return;
         }
         // There are 3 primary groups are formated in such a way that
