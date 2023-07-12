@@ -13,9 +13,10 @@ class CPU{
     static Z_FLAG = 0x1;
     static I_FLAG = 0x2;
     static D_FLAG = 0x3;
+    static B_FLAG = 0x4;
     // Bits 5 and 4 literally do nothing
     // Bit 5 is physically always set to HIGH (1) in the original CPU
-    // Bit 4 is set when an interrupt is called depending on the type of
+    // Bit 4 (B_FLAG) is set when an interrupt is called depending on the type of
     // interrupt before it's pushed on the stack, but then it's just
     // discarded when restored (?)
     static V_FLAG = 0x6;
@@ -28,6 +29,10 @@ class CPU{
         this.proc_status = 0x34;
         this.stack_ptr   = 0x01FF;
         this.prg_counter = 0x0000;
+    }
+
+    get_flag(pos){
+        return (this.proc_status & (1<<pos)) >> pos;
     }
 
     set_flag(pos, val){
@@ -142,28 +147,48 @@ class CPU{
         if (group == 0x1){
             switch (addr_mode){
                 case 0x0:
-                    return indexed_indirect();
+                    return this.indexed_indirect();
                 case 0x1:
-                    return zero_page();
+                    return this.zero_page();
                 case 0x2:
-                    return immediate();
+                    return this.immediate();
                 case 0x3:
-                    return absolute();
+                    return this.absolute();
                 case 0x4:
-                    return indirect_indexed();
+                    return this.indirect_indexed();
                 case 0x5:
-                    return indexed_zp_x();
+                    return this.indexed_zp_x();
                 case 0x6:
-                    return indexed_abs_y();
+                    return this.indexed_abs_y();
                 case 0x7:
-                    return indexed_abs_x();
+                    return this.indexed_abs_x();
+            }
+            if (group == 0x2){
+                switch (addr_mode){
+                    case 0x0:
+                        return this.immediate();
+                    case 0x1:
+                        return this.zero_page();
+                    case 0x2:
+                        // Accumulator mode uses the accumulator
+                        // itself as the data, so it makes no sense
+                        // to give back the usual object, the
+                        // opcodes should handle this exception themselves
+                        return null;
+                    case 0x3:
+                        return this.absolute();
+                    case 0x5:
+                        return this.indexed_zp_x();
+                    case 0x7:
+                        return this.indexed_abs_x();
+                }
             }
         }
         return null;
     }
 
     emulate_cycle(){
-        let opcode       = MMAP.get_byte(this.prg_counter);
+        let opcode = MMAP.get_byte(this.prg_counter);
         // Check for all the single byte instructions since they don't really
         // fit any pattern
         if (opcode == 0x00){ // BRK
@@ -288,7 +313,7 @@ class CPU{
                     return;
                 case 0x3: // ADC
                     let old_sign_bit = this.acc & 0x80;
-                    this.acc = (this.acc + MMAP.get_byte(data.addr)) & 0xFF;
+                    this.acc = (this.acc + MMAP.get_byte(data.addr) + this.get_flag(CPU.C_FLAG)) & 0xFF;
                     this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
                     this.set_flag(CPU.V_FLAG, (this.acc & 0x80) != old_sign_bit);
                     this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -320,7 +345,7 @@ class CPU{
                 case 0x7: // SBC
                     let old_sign_bit = this.acc & 0x80;
                     // & 0xFF at the end because of weird casting signed/unsigned stuff
-                    this.acc = (this.acc - MMAP.get_byte(data.addr)) & 0xFF;
+                    this.acc = (this.acc - MMAP.get_byte(data.addr) - (!this.get_flag(CPU.C_FLAG))) & 0xFF;
                     this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
                     this.set_flag(CPU.V_FLAG, (this.acc & 0x80) != old_sign_bit);
                     this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -331,22 +356,120 @@ class CPU{
         }
         // Group 2
         if (op_group == 0x2){
+            let data = this.group_get_data(op_addr_mode, 0x2);
             switch (op_id){
                 case 0x0: // ASL
+                    if (op_addr_mode == 0x2){
+                        // Shift accumulator if addressing mode
+                        // is accumulator
+                        this.set_flag(CPU.C_FLAG,  this.acc & 0x80);
+                        this.acc <<= 1;
+                        this.set_flag(CPU.Z_FLAG, !this.acc);
+                        this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+                        return;
+                    }
+                    // Otherwise shift memory
+                    let val = MMAP.get_byte(data.addr);
+                    this.set_flag(CPU.C_FLAG,  val & 0x80);
+                    val <<= 1;
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    MMAP.set_byte(data.addr, val);
                     return;
                 case 0x1: // ROL
+                    if (op_addr_mode == 0x2){
+                        // Same as before
+                        let high_bit = this.acc & 0x80;
+                        this.acc = (this.acc << 1) | this.get_flag(CPU.C_FLAG);
+                        this.set_flag(CPU.C_FLAG,  high_bit);
+                        this.set_flag(CPU.Z_FLAG, !this.acc);
+                        this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+                        return;
+                    }
+                    let val = MMAP.get_byte(data.addr);
+                    let high_bit = val & 0x80;
+                    val = (val << 1) | this.get_flag(CPU.C_FLAG);
+                    this.set_flag(CPU.C_FLAG,  high_bit);
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    this.set_flag(CPU.N_FLAG,  val & 0x80);
                     return;
                 case 0x2: // LSR
+                    if (op_addr_mode == 0x2){
+                        // Same as before
+                        this.set_flag(CPU.C_FLAG,  this.acc & 0x01);
+                        this.acc >>>= 1;
+                        this.set_flag(CPU.Z_FLAG, !this.acc);
+                        // N flag will always be 0 after right shift
+                        this.set_flag(CPU.N_FLAG,  0);
+                        return;
+                    }
+                    let val = MMAP.get_byte(data.addr);
+                    this.set_flag(CPU.C_FLAG,  val & 0x01);
+                    val >>>= 1;
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    this.set_flag(CPU.N_FLAG,  0);
+                    MMAP.set_byte(data.addr, val);
                     return;
                 case 0x3: // ROR
+                    if (op_addr_mode == 0x2){
+                        // Same as before
+                        let low_bit = this.acc & 0x01;
+                        this.acc = (this.acc >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
+                        this.set_flag(CPU.C_FLAG,  low_bit);
+                        this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
+                        this.set_flag(CPU.Z_FLAG, !this.acc);
+                        return;
+                    }
+                    let val = MMAP.get_byte(data.addr);
+                    let low_bit = val & 0x01;
+                    val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
+                    this.set_flag(CPU.C_FLAG,  low_bit);
+                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    MMAP.set_byte(data.addr, val);
                     return;
+                // These four next instruction don't support accumulator
+                // mode so no need to worry about that exception
                 case 0x4: // STX
+                    // addr8, X becomes addr8, Y with this instruction
+                    if (op_addr_mode == 0x5) data = this.indexed_zp_y();
+                    // Absolute indexed, immediate, accumulator addressing
+                    // modes not allowed in this instrucion
+                    else if ((op_addr_mode == 0x7)
+                           ||(op_addr_mode == 0x0)
+                           ||(op_addr_mode == 0x2)) return null;
+                    MMAP.set_byte(data.addr, this.x_reg);
                     return;
                 case 0x5: // LDX
+                    // addr8, X becomes addr8, Y
+                    if (op_addr_mode == 0x5) data = this.indexed_zp_y();
+                    // addr16, X becomes addr16, Y
+                    else if (op_addr_mode == 0x7) data = this.indexed_abs_y();
+                    // Accumulator addressing mode not allowed
+                    else if (op_addr_mode == 0x2) return null;
+                    this.x_reg = MMAP.get_byte(data.addr);
+                    this.set_flag(CPU.Z_FLAG, !this.x_reg);
+                    this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
                     return;
                 case 0x6: // DEC
+                    // Immediate and accumulator addressing modes not allowed
+                    if ((op_addr_mode == 0x0)
+                      ||(op_addr_mode == 0x2)) return null;
+                    let val = MMAP.get_byte(data.addr);
+                    val = (val - 1) & 0xFF;
+                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    MMAP.set_byte(data.addr, val);
                     return;
                 case 0x7: // INC
+                    // Immediate and accumulator addressing modes not allowed
+                    if ((op_addr_mode == 0x0)
+                      ||(op_addr_mode == 0x2)) return null;
+                    let val = MMAP.get_byte(data.addr);
+                    val = (val + 1) & 0xFF;
+                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    MMAP.set_byte(data.addr, val);
                     return;
             }
         }
