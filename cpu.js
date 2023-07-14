@@ -36,7 +36,12 @@ class CPU{
         // but the stack is located in 0x0100 - 0x01FF
         // so we need to offset it by 0x0100 when we use it
         this.stack_ptr   = 0xFF;
-        this.prg_counter = 0x0000;
+        this.prg_counter = 0xC000; // For testing purpouses
+    }
+
+    reset(){
+        // Load reset/power-on vector into PC
+        this.prg_counter = (MMAP.get_byte(0xFFFD) << 8) | MMAP.get_byte(0xFFFC);
     }
 
     push(val){
@@ -79,6 +84,14 @@ class CPU{
     // Throughout all these addressing mode fetching instructions,
     // we only return the page_crossed property if the addressing
     // mode can add an extra cycle because of a page being crossed
+    accumulator(){
+        // Returning an address doesn't make any sense since the
+        // accumulator is a register, so the instructions which use
+        // accumulator addressing mode should handle this exception
+        // themselves
+        return {bytes_used: 1, addr: null};
+    }
+
     immediate(){
         // Second byte of instruction is the data itself
         return {bytes_used: 1, addr: this.prg_counter+1};
@@ -118,7 +131,7 @@ class CPU{
         // carry but I don't know if that's how it's done)
         let ptr = (MMAP.get_byte(this.prg_counter+2) << 8) | MMAP.get_byte(this.prg_counter+1);
         let indexed_ptr = (ptr + this.x_reg) & 0x0FFFF;
-        let page_cross = (ptr>>>16) != (indexed>>>16);
+        let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
         return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
     }
 
@@ -128,44 +141,51 @@ class CPU{
         // carry but I don't know if that's how it's done)
         let ptr = (MMAP.get_byte(this.prg_counter+2) << 8) | MMAP.get_byte(this.prg_counter+1);
         let indexed_ptr = (ptr + this.y_reg) & 0x0FFFF;
-        let page_cross = (ptr>>>16) != (indexed>>>16);
+        let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
         return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
     }
 
     relative(){
-        // Returns the current program counter shifter by the signed byte
-        // in the second byte of the instruction
-        // Explanation as to why that signs the bit:
-        // https://blog.vjeux.com/2013/javascript/conversion-from-uint8-to-int8-x-24.html
+        // Returns the current program counter shifted by the signed byte
+        // but pretending it's already at the next instruction (+2)
+        // Convert to 32bit signed by using sign preserving right shift
         let signed_offset = MMAP.get_byte(this.prg_counter+1) << 24 >> 24;
-        // Behaviour goes crazy when the subtraction returns a negative number
-        // but that should never happen (carry is ignored, so going over is no problem)
-        // carry but I don't know if that's how it's done)
-        let ptr = (MMAP.get_byte(this.prg_counter+2) << 8) | MMAP.get_byte(this.prg_counter+1);
-        let indexed_ptr = (ptr + signed_offset) & 0x0FFFF;
-        let page_cross = (ptr>>>16) != (indexed>>>16);
-        return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
+        // Read note to self above branch instructions implementation
+        // as to why this happens
+        let ptr = this.prg_counter + 2;
+        // Using 32bit signed offset because it makes my life easier not
+        // having to deal with that arithmetic and just doing a 16bit
+        // mask at the end
+        let indexed_ptr = (ptr + signed_offset) & 0xFFFF;
+        let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
+        return {bytes_used: 1, addr: indexed_ptr, page_crossed: page_cross};
     }
 
     indexed_indirect(){ // (addr8, X)
         // Pointer to 16bit pointer stored in the zero-page
         let zp_ptr = (MMAP.get_byte(this.prg_counter+1) + this.xreg) & 0x0FF;
         // 16bit pointer to data in memory
-        let true_ptr = (MMAP.get_byte(zp_ptr + 1) << 8) | MMAP.get_byte(zp_ptr);
+        // I think zp_ptr + 1 should wrap around by ignoring carry but
+        // I'm not completely sure
+        let true_ptr = (MMAP.get_byte((zp_ptr + 1) & 0xFF) << 8) | MMAP.get_byte(zp_ptr);
         return {bytes_used: 1, addr: true_ptr};
     }
 
     indirect_indexed(){ // (addr8), Y
-        // Second byte of instruction points to 16bit pointer in zero-page
+        // This addressing mode is so confusing, just read the docs:
+        // https://stackoverflow.com/questions/46262435/indirect-y-indexed-addressing-mode-in-mos-6502
         let zp_ptr = MMAP.get_byte(this.prg_counter+1);
-        // Retrieve said pointer
-        let true_ptr = (MMAP.get_byte(zp_ptr + 1) << 8) | MMAP.get_byte(zp_ptr);
-        // Add contents of y_reg to get final pointer
-        // (I'm ignoring the carry but I'm not quite sure if that's necessary
-        // or if it's different)
-        let indexed_ptr = (true_ptr + this.y_reg) & 0x0FFFF;
-        let page_cross = (true_ptr>>>16) != (indexed_ptr>>>16);
-        return {bytes_used: 1, addr: indexed_ptr, page_crossed: page_cross};
+        let low = MMAP.get_byte(zp_ptr) + this.y_reg;
+        let carry = low >>> 8;
+        low &= 0xFF;
+        // I'm really not sure what to do with the carry of zp_ptr + 1 but I think it's
+        // ignored (but I could very much be wrong)
+        let high = (MMAP.get_byte((zp_ptr+1) & 0xFF) + carry) & 0xFF;
+        let true_ptr = (high << 8) | low;
+        // I'm really not sure if that's how the page-crossing works on this addressing
+        // mode but it's the only option that made sense to me since I couldn't find much
+        // information on this
+        return {bytes_used: 1, addr: true_ptr, page_crossed: carry};
     }
 
     absolute_indirect(){ // (addr16)
@@ -183,42 +203,42 @@ class CPU{
         // that here (except STA, which always takes the extra
         // page-cross cycle when possible for some reason???)
         let is_sta = op_id == 0x4;
+        let data = null;
         switch (addr_mode){
             case 0x0:
-                let data = this.indexed_indirect();
+                data = this.indexed_indirect();
                 data.cycles = 6;
-                return data;
+                break;
             case 0x1:
-                let data = this.zero_page();
+                data = this.zero_page();
                 data.cycles = 3;
-                return data;
+                break;
             case 0x2:
-                let data = this.immediate();
+                data = this.immediate();
                 data.cycles = 2;
-                return data;
+                break;
             case 0x3:
-                let data = this.absolute();
+                data = this.absolute();
                 data.cycles = 4;
-                return data;
+                break;
             case 0x4:
-                let data = this.indirect_indexed();
+                data = this.indirect_indexed();
                 data.cycles = 5 + (is_sta ? 1 : data.page_crossed);
-                return data;
+                break;
             case 0x5:
-                let data = this.indexed_zp_x();
+                data = this.indexed_zp_x();
                 data.cycles = 4;
-                return data;
+                break;
             case 0x6:
-                let data = this.indexed_abs_y();
+                data = this.indexed_abs_y();
                 data.cycles = 4 + (is_sta ? 1 : data.page_crossed);
-                return data;
+                break;
             case 0x7:
-                let data = this.indexed_abs_x();
+                data = this.indexed_abs_x();
                 data.cycles = 4 + (is_sta ? 1 : data.page_crossed);
-                return data;
+                break;
         }
-        // If somehow get here???
-        return null;
+        return data;
     }
 
     group_two_get_data(id, addr_mode){
@@ -226,76 +246,74 @@ class CPU{
         // zero-page, indexed zero-page, indexed absolute
         // addressing mode (ugh...)
         let exception_op = (id == 0x4) || (id == 0x5);
+        let data = null;
         switch (addr_mode){
             case 0x0:
-                let data = this.immediate();
+                data = this.immediate();
                 // Only instruction that uses immediate
                 // addressing mode is LDX, so no neeed for
                 // weird exceptions
                 data.cycles = 2;
-                return data;
+                break;
             case 0x1:
-                let data = this.zero_page();
+                data = this.zero_page();
                 data.cycles = exception_op ? 3 : 5;
-                return data;
+                break;
             case 0x2:
-                // Accumulator mode uses the accumulator
-                // itself as the data, so it makes no sense
-                // to give back the usual object, the
-                // opcodes should handle this exception themselves
-                // Note: STX and LDX don't use accumulator mode, so
-                // no need for weird exceptions
-                return {cycles: 2};
+                data = this.accumulator();
+                // All the ops which use accumulator addressing
+                // mode follow a regular pattern so no exceptions
+                data.cycles = 2;
+                break;
             case 0x3:
-                let data = this.absolute();
+                data = this.absolute();
                 data.cycles = exception_op ? 4 : 6;
-                return data;
+                break;
             case 0x5:
                 // addr8, X becomes addr8, Y for STX and LDX
-                let data = exception_op ? this.indexed_zp_y() : this.indexed_zp_x();
+                data = exception_op ? this.indexed_zp_y() : this.indexed_zp_x();
                 data.cycles = exception_op ? 4 : 6;
-                return data;
+                break;
             case 0x7:
                 // addr16, X becomes addr16, Y for LDX (STX doesn't support
                 // absolute indexed addressing mode)
-                let data = exception_op ? this.indexed_abs_y() : this.indexed_abs_x();
+                data = exception_op ? this.indexed_abs_y() : this.indexed_abs_x();
                 data.cycles = exception_op ? (4+data.page_crossed) : 7;
-                return data;
+                break;
         }
-        // If somehow we get here???
-        return null;
+        return data;
     }
 
     group_three_get_data(addr_mode){
+        let data = null;
         switch(addr_mode){
             case 0x0:
-                let data = this.immediate();
+                data = this.immediate();
                 data.cycles = 2;
-                return data;
+                break;
             case 0x1:
-                let data = this.zero_page();
+                data = this.zero_page();
                 data.cycles = 3;
-                return data;
+                break;
             case 0x3:
-                let data = this.absolute();
+                data = this.absolute();
                 data.cycles = 4;
-                return data;
+                break;
             case 0x5:
-                let data = this.indexed_zp_x();
+                data = this.indexed_zp_x();
                 data.cycles = 4;
-                return data;
+                break;
             case 0x7:
-                let data = this.indexed_abs_x();
+                data = this.indexed_abs_x();
                 data.cycles = 4 + data.page_crossed;
-                return data;
+                break;
         }
-        // If somehow we get here???
-        return null;
+        return data;
     }
 
     group_get_data(id, addr_mode, group){
         // Opcode ID needed for group 1 since STA is an exception
-        if      (group == 0x1) return this.group_one_get_data(op_id, addr_mode);
+        if      (group == 0x1) return this.group_one_get_data(id, addr_mode);
         // Opcode ID needed for group 2 because STX and LDX are exceptions
         else if (group == 0x2) return this.group_two_get_data(id, addr_mode);
         // Opcide ID not needed for group 3 as there are no exceptions
@@ -306,8 +324,10 @@ class CPU{
     }
 
     // Returns amount of cycles used to complete instruction
-    emulate_cycle(){
+    exec_op(){
         let opcode = MMAP.get_byte(this.prg_counter);
+        console.log("0x" + this.prg_counter.toString(16).padStart(4, "0")
+                + ": 0x" +           opcode.toString(16).padStart(2, "0"));
         // Check for all the single byte instructions since they don't really
         // fit any pattern
         if (opcode == 0x00){ // BRK
@@ -318,11 +338,11 @@ class CPU{
             // Push low PC
             this.push((this.prg_counter & 0x00FF) >>> 0);
             // Push proc status with B_FLAG set for some goddamn reason???
-            this.set_flag(B_FLAG, 1);
+            this.set_flag(CPU.B_FLAG, 1);
             this.push(this.proc_status);
             // Again, I guess this is how it's done???
             // Interrupts are confusing as hell
-            this.set_flag(I_FLAG, 1);
+            this.set_flag(CPU.I_FLAG, 1);
             this.prg_counter = (MMAP.get_byte(0xFFFF) << 8) | MMAP.get_byte(0xFFFE);
             return 7;
         }
@@ -338,7 +358,7 @@ class CPU{
             // Make sure order of operations doesn't mess up
             this.prg_counter = 0x0000;
             this.prg_counter |= this.pop();
-            this.prg_counter |= this.pop();
+            this.prg_counter |= this.pop() << 8;
             // Read docs as to why this happens
             this.prg_counter++;
             return 6;
@@ -442,10 +462,8 @@ class CPU{
             this.prg_counter++;
             return 2;
         }
-        if (opcode == 0x9A){ // TSX
-            this.x_reg = this.stack_ptr;
-            this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
-            this.set_flag(CPU.Z_FLAG, !this.x_reg);
+        if (opcode == 0x9A){ // TXS
+            this.stack_ptr = this.x_reg;
             this.prg_counter++;
             return 2;
         }
@@ -457,7 +475,9 @@ class CPU{
             return 2;
         }
         if (opcode == 0xBA){ // TSX
-            this.stack_ptr = this.x_reg;
+            this.x_reg = this.stack_ptr;
+            this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+            this.set_flag(CPU.Z_FLAG, !this.x_reg);
             this.prg_counter++;
             return 2;
         }
@@ -488,6 +508,10 @@ class CPU{
         // Check for branch instructions. They are formatted so that
         // they're XXY10000, where XX indicates the flag to check and
         // Y represents the value to check it against
+        // IMPORTANT NOTE TO SELF:
+        // The branch instruction adds the offset to the program counter
+        // once it has moved on to the next instruction, not when it's
+        // still at the signed offset (in the real hardware)
         if ((opcode & 0x1F) == 0x10){
             // This system massively simplifies the code for all the branches
             // but it may be the case that some subtleties break or something
@@ -521,7 +545,7 @@ class CPU{
             // Push low PC
             this.push((this.prg_counter & 0x00FF) >>> 0);
             this.prg_counter = data.addr;
-            return ;
+            return 6;
         }
         // There are 3 primary groups are formated in such a way that
         // they're AAABBBCC, where AAA identifies the opcode, BBB
@@ -535,24 +559,29 @@ class CPU{
             // We send op_id because STA has that pesky exception
             let data = this.group_get_data(op_id, op_addr_mode, 0x1);
             switch (op_id){
-                case 0x0: // ORA
+                // Curly braces in the cases because JS scoping is stupid
+                case 0x0:{ // ORA
                     this.acc |= MMAP.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.acc);
+                    this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x1: // AND
+                }
+                case 0x1:{ // AND
                     this.acc &= MMAP.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.acc);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x2: // EOR
+                }
+                case 0x2:{ // EOR
                     this.acc ^= MMAP.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.acc);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x3: // ADC
+                }
+                case 0x3:{ // ADC
                     let old_sign_bit = this.acc & 0x80;
                     this.acc += MMAP.get_byte(data.addr) + this.get_flag(CPU.C_FLAG);
                     this.set_flag(CPU.C_FLAG,  this.acc > 0xFF);
@@ -562,7 +591,8 @@ class CPU{
                     this.set_flag(CPU.Z_FLAG, !this.acc);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x4: // STA
+                }
+                case 0x4:{ // STA
                     // Only exception in group 1, since STA needs an
                     // actual memory address to store the accumulator,
                     // using immediate addressing mode makes no sense
@@ -570,13 +600,15 @@ class CPU{
                     MMAP.set_byte(data.addr, this.acc);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x5: // LDA
+                }
+                case 0x5:{ // LDA
                     this.acc = MMAP.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.acc);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x6: // CMP
+                }
+                case 0x6:{ // CMP
                     // & 0xFF at the end because of weird casting signed/unsigned stuff
                     let result = (this.acc - MMAP.get_byte(data.addr)) & 0xFF;
                     this.set_flag(CPU.N_FLAG,  result & 0x80);
@@ -584,7 +616,8 @@ class CPU{
                     this.set_flag(CPU.C_FLAG,  this.acc >= MMAP.get_byte(data.addr));
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x7: // SBC
+                }
+                case 0x7:{ // SBC
                     let old_sign_bit = this.acc & 0x80;
                     let subtrahend = MMAP.get_byte(data.addr) + this.get_flag(CPU.C_FLAG);
                     this.set_flag(CPU.C_FLAG,  this.acc >= subtrahend);
@@ -595,6 +628,7 @@ class CPU{
                     this.set_flag(CPU.Z_FLAG, !this.acc);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
+                }
             }
         }
         // Group 2
@@ -605,95 +639,69 @@ class CPU{
             // but one with just the cycles)
             let data = this.group_get_data(op_id, op_addr_mode, 0x2);
             switch (op_id){
-                case 0x0: // ASL
+                case 0x0:{ // ASL
                     // Immediate addressing mode not allowed
                     if (op_addr_mode == 0x0) return null;
-                    if (op_addr_mode == 0x2){
-                        // Shift accumulator if addressing mode
-                        // is accumulator
-                        this.set_flag(CPU.C_FLAG,  this.acc & 0x80);
-                        this.acc <<= 1;
-                        this.set_flag(CPU.Z_FLAG, !this.acc);
-                        this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
-                        this.prg_counter += data.bytes_used + 1;
-                        return data.cycles;
-                    }
-                    // Otherwise shift memory
-                    let val = MMAP.get_byte(data.addr);
+                    // Handle accumulator addressing mode
+                    let val = (op_addr_mode == 0x2) ? this.acc : MMAP.get_byte(data.addr);
                     this.set_flag(CPU.C_FLAG,  val & 0x80);
                     val <<= 1;
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
-                    MMAP.set_byte(data.addr, val);
+                    // Again handle accumulator addressing mode
+                    if (op_addr_mode == 0x2) this.acc = val;
+                    else MMAP.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x1: // ROL
+                }
+                case 0x1:{ // ROL
                     // Immediate addressing mode not allowed
                     if (op_addr_mode == 0x0) return null;
-                    if (op_addr_mode == 0x2){
-                        // Same as before
-                        let high_bit = this.acc & 0x80;
-                        this.acc = (this.acc << 1) | this.get_flag(CPU.C_FLAG);
-                        this.set_flag(CPU.C_FLAG,  high_bit);
-                        this.set_flag(CPU.Z_FLAG, !this.acc);
-                        this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
-                        this.prg_counter += data.bytes_used + 1;
-                        return data.cycles;
-                    }
-                    let val = MMAP.get_byte(data.addr);
+                    // Same as before
+                    let val = (op_addr_mode == 0x2) ? this.acc : MMAP.get_byte(data.addr);
                     let high_bit = val & 0x80;
                     val = (val << 1) | this.get_flag(CPU.C_FLAG);
                     this.set_flag(CPU.C_FLAG,  high_bit);
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    if (op_addr_mode == 0x2) this.acc = val;
+                    else MMAP.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x2: // LSR
+                }
+                case 0x2:{ // LSR
                     // Immediate addressing mode not allowed
                     if (op_addr_mode == 0x0) return null;
-                    if (op_addr_mode == 0x2){
-                        // Same as before
-                        this.set_flag(CPU.C_FLAG,  this.acc & 0x01);
-                        this.acc >>>= 1;
-                        this.set_flag(CPU.Z_FLAG, !this.acc);
-                        // N flag will always be 0 after right shift
-                        this.set_flag(CPU.N_FLAG,  0);
-                        this.prg_counter += data.bytes_used + 1;
-                        return data.cycles;
-                    }
-                    let val = MMAP.get_byte(data.addr);
+                    // Same as before
+                    let val = (op_addr_mode == 0x2) ? this.acc : MMAP.get_byte(data.addr);
                     this.set_flag(CPU.C_FLAG,  val & 0x01);
                     val >>>= 1;
                     this.set_flag(CPU.Z_FLAG, !val);
+                    // N_FLAG will always be 0 after LSR (obviously!)
                     this.set_flag(CPU.N_FLAG,  0);
-                    MMAP.set_byte(data.addr, val);
+                    if (op_addr_mode == 0x2) this.acc = val;
+                    else MMAP.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x3: // ROR
+                }
+                case 0x3:{ // ROR
                     // Immediate addressing mode not allowed
                     if (op_addr_mode == 0x0) return null;
-                    if (op_addr_mode == 0x2){
-                        // Same as before
-                        let low_bit = this.acc & 0x01;
-                        this.acc = (this.acc >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
-                        this.set_flag(CPU.C_FLAG,  low_bit);
-                        this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
-                        this.set_flag(CPU.Z_FLAG, !this.acc);
-                        this.prg_counter += data.bytes_used + 1;
-                        return data.cycles;
-                    }
-                    let val = MMAP.get_byte(data.addr);
+                    // Same as before
+                    let val = (op_addr_mode == 0x2) ? this.acc : MMAP.get_byte(data.addr);
                     let low_bit = val & 0x01;
                     val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
                     this.set_flag(CPU.C_FLAG,  low_bit);
                     this.set_flag(CPU.N_FLAG,  val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
-                    MMAP.set_byte(data.addr, val);
+                    if (op_addr_mode == 0x2) this.acc = val;
+                    else MMAP.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
+                }
                 // These four next instruction don't support accumulator
                 // mode so no need to worry about that exception
-                case 0x4: // STX
+                case 0x4:{ // STX
                     // Absolute indexed, immediate, accumulator addressing
                     // modes not allowed in this instrucion
                     if ((op_addr_mode == 0x7)
@@ -702,7 +710,8 @@ class CPU{
                     MMAP.set_byte(data.addr, this.x_reg);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x5: // LDX
+                }
+                case 0x5:{ // LDX
                     // Accumulator addressing mode not allowed
                     if (op_addr_mode == 0x2) return null;
                     this.x_reg = MMAP.get_byte(data.addr);
@@ -710,7 +719,8 @@ class CPU{
                     this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x6: // DEC
+                }
+                case 0x6:{ // DEC
                     // Immediate and accumulator addressing modes not allowed
                     if ((op_addr_mode == 0x0)
                       ||(op_addr_mode == 0x2)) return null;
@@ -721,7 +731,8 @@ class CPU{
                     MMAP.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x7: // INC
+                }
+                case 0x7:{ // INC
                     // Immediate and accumulator addressing modes not allowed
                     if ((op_addr_mode == 0x0)
                       ||(op_addr_mode == 0x2)) return null;
@@ -732,13 +743,14 @@ class CPU{
                     MMAP.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
+                }
             }
         }
         // Group 3
         if (op_group == 0x0){
-            let data = group_get_data(op_id, op_addr_mode, 0x0);
+            let data = this.group_get_data(op_id, op_addr_mode, 0x0);
             switch (op_id){
-                case 0x1: // BIT
+                case 0x1:{ // BIT
                     // This is such a weird instruction
                     // Immediate, zero page indexed, absolute indexed addressing
                     // modes not allowed for this instruction
@@ -755,7 +767,9 @@ class CPU{
                     this.set_flag(CPU.Z_FLAG, !(val & this.acc));
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x4: // STY
+                }
+                // Gap here because I didn't include JMP in group 3
+                case 0x4:{ // STY
                     // Immediate and absolute indexed addressing modes
                     // not allowed for this intruction
                     if ((op_addr_mode == 0x0)
@@ -763,13 +777,15 @@ class CPU{
                     MMAP.set_byte(data.addr, this.y_reg);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x5: // LDY
+                }
+                case 0x5:{ // LDY
                     this.y_reg = MMAP.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.y_reg);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x6: // CPY
+                }
+                case 0x6:{ // CPY
                     // Zero page indexed, absolute indexed addressing
                     // modes not allowed for this instruction
                     if ((op_addr_mode == 0x4)
@@ -781,7 +797,8 @@ class CPU{
                     this.set_flag(CPU.C_FLAG,  this.y_reg >= MMAP.get_byte(data.addr));
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
-                case 0x7: // CPX
+                }
+                case 0x7:{ // CPX
                     // Zero page indexed, absolute indexed addressing
                     // modes not allowed for this instruction
                     if ((op_addr_mode == 0x4)
@@ -793,9 +810,11 @@ class CPU{
                     this.set_flag(CPU.C_FLAG,  this.x_reg >= MMAP.get_byte(data.addr));
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
+                }
             }
         }
         // Instruction not found
+        console.log("opcode not found");
         return null;
     }
 }
