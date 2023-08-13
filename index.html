@@ -6,10 +6,16 @@
 		<link rel="stylesheet" href="style.css"/>
 	</head>
 	<body>
-		<input id="rom-input" type="file" name="rom-input"/> 
-		<script src="mmap.js"></script>
-		<script src="cpu.js"></script>
-		<script src="index.js"></script>
+		<input id="rom-input" type="file" name="rom-input"/>
+        <br/>
+        <canvas id="screen" width="256" height="240"></canvas>
+        <script src="utils.js"     ></script>
+        <script src="mmap.js"      ></script>
+        <script src="controller.js"></script>
+        <script src="ppu.js"       ></script>
+		<script src="cpu.js"       ></script>
+        <script src="nes.js"       ></script>
+		<script src="main.js"      ></script>
 	</body>
 </html>
 

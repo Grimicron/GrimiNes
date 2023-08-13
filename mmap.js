@@ -3,8 +3,6 @@ class MMAP{
     static PPU_MEM_SIZE = 0x04000;
     static PRG_ROM_BLOCK_SIZE = 0x04000;
     static CHR_ROM_BLOCK_SIZE = 0x02000;
-    static cpu_memory;
-    static ppu_memory;
 
     // IMPORTANT NOTE TO SELF:
     // The PPU has its own address space from 0x0000 to 0x3FFF
@@ -15,84 +13,165 @@ class MMAP{
     // with a mapping system). That space is called the pattern
     // table.
 
-    static init(){
-        MMAP.cpu_memory = new Uint8Array(MMAP.CPU_MEM_SIZE);
-        MMAP.ppu_memory = new Uint8Array(MMAP.PPU_MEM_SIZE);
+    constructor(p_nes){
+        this.nes = p_nes;
+        this.cpu_memory = new Uint8Array(MMAP.CPU_MEM_SIZE);
+        this.ppu_memory = new Uint8Array(MMAP.PPU_MEM_SIZE);
         // No need to initialize these to have all their entries
         // set to 0, they are 0 by default
     }
 
-    static load_prg_rom_block(rom, rom_addr, mmap_addr){
+    load_prg_rom_block(rom, rom_addr, mmap_addr){
         for (let i = 0; i < MMAP.PRG_ROM_BLOCK_SIZE; i++){
-            MMAP.cpu_memory[i + mmap_addr] = rom[i + rom_addr];
+            this.cpu_memory[i + mmap_addr] = rom[i + rom_addr];
         }
     }
 
-    static load_prg_rom(rom){
-        // For testing purpouses currently, we assume
-        // NROM-128 mapper, meaning we mirror the PRG-ROM
-        // from 0x8000 - 0xBFFF to 0xC000 - 0xFFFF
-        // We start at 0x0010 in the ROM to ignore the 
-        // 16 bytes of headers
-        MMAP.load_prg_rom_block(rom, 0x0010, 0x8000);
+    load_prg_rom(rom){
+        this.load_prg_rom_block(rom, 0x0010, 0x8000);
+        this.load_prg_rom_block(rom, 0x4010, 0xC000);
     }
 
-    static load_chr_rom(rom){
+    load_chr_rom(rom){
         for (let i = 0; i < MMAP.CHR_ROM_BLOCK_SIZE; i++){
-            // We start at 0x0000 so no need for an offset
-            // in the ppu_memory
-            // In the ROM, we need to skip the headers (0x0010)
-            // and the PRG-ROM (0x4000)
-            MMAP.ppu_memory[i] = rom[i + 0x4000 + 0x0010];
+            this.ppu_memory[i] = rom[i + 0x8010];
         }
     }
 
-    static load_rom(rom){
-        MMAP.load_prg_rom(rom);
-        MMAP.load_chr_rom(rom);
+    load_rom(rom){
+        this.load_prg_rom(rom);
+        this.load_chr_rom(rom);
     }
 
-    static get_byte(addr){
-        // Always occurs
-        if ((addr >= 0x2008) && (addr <= 0x3FFF)) return MMAP.get_byte((addr % 8) + 0x2000);
-        // NROM-128 mirroring behaviour
-        if ((addr >= 0xC000) && (addr <= 0xFFFF)) return MMAP.get_byte(addr - 0x4000);
-        return MMAP.cpu_memory[addr];
+    apply_mirrors(addr){
+        // See NesDev wiki for a more detailed explanation
+        // We do this sort of recursiveness just in case there are
+        // multiple layers of mirroring/redirects
+        if ((addr >= 0x800)  && (addr <= 0x1FFF)) return this.apply_mirrors( addr % 0x0800);
+        if ((addr >= 0x2008) && (addr <= 0x3FFF)) return this.apply_mirrors((addr % 8) + 0x2000);
+        return addr;
     }
 
-    static set_byte(addr, val){
-        if ((addr >= 0x2008) && (addr <= 0x3FFF)){
-            MMAP.set_byte((addr % 8) + 0x2000);
-            return;
+    get_byte(addr, mod=true){
+        addr = this.apply_mirrors(addr);
+        // Map to PPU registers
+        switch (addr){
+            case 0x2000:
+                // Write only register
+                debug_log("Attempted read to PPU_CTRL");
+                return null;
+            case 0x2001:
+                // Write only register
+                debug_log("Attempted read to PPU_MASK");
+                return null;
+            case 0x2002:
+                return this.nes.ppu.get_reg_status();
+            case 0x2003:
+                // Write only register
+                debug_log("Attempted read to OAM_ADDR");
+                return null;
+            case 0x2004:
+                return this.nes.ppu.get_oam_data();
+            case 0x2005:
+                // Write only register
+                debug_log("Attempted read to PPU_SCROLL");
+                return null;
+            case 0x2006:
+                // Write only register
+                debug_log("Attempted read to PPU_ADDR");
+                return null;
+            case 0x2007:
+                return this.nes.ppu.get_reg_data(mod);
+            case 0x4014:
+                debug_log("Attempted read to OAM_DMA");
+                return null;
+            case 0x4016:
+                return this.nes.controller.get_status(mod);
         }
-        // NROM-128 mirroring behaviour
-        // NROM-128 mirroring behaviour
-        if ((addr >= 0xC000) && (addr <= 0xFFFF)){
-            MMAP.set_byte(addr - 0x4000);
-            return;
-        }
-        MMAP.cpu_memory[addr] = val;
+        return this.cpu_memory[addr];
     }
 
-    // Prints out all the CPU memory in the interval [start, end]
-    // Also returns it for use in other utilites/debug purpouses
-    static memdump(start, end){
+    set_byte(addr, val){
+        addr = this.apply_mirrors(addr);
+        switch (addr){
+            case 0x2000:
+                this.nes.ppu.set_reg_ctrl(val);
+                return;
+            case 0x2001:
+                this.nes.ppu.set_reg_mask(val);
+                return;
+            case 0x2002:
+                // Read only register
+                debug_log("Attempted write to PPU_STATUS");
+                return;
+            case 0x2003:
+                this.nes.ppu.set_oam_addr(val);
+                return;
+            case 0x2004:
+                this.nes.ppu.set_oam_data(val);
+                return;
+            case 0x2005:
+                this.nes.ppu.set_reg_scroll(val);
+                return;
+            case 0x2006:
+                this.nes.ppu.set_reg_addr(val);
+                return;
+            case 0x2007:
+                this.nes.ppu.set_reg_data(val);
+                return;
+            case 0x4014:
+                this.nes.ppu.set_oam_dma(val);
+                return;
+            case 0x4016:
+                this.nes.ppu.set_strobe(val);
+                return;
+        }
+        this.cpu_memory[addr] = val;
+    }
+
+    ppu_apply_mirrors(addr){
+        // Same recursive principle as before except
+        // for these first 4 single address mirrors
+        if  (addr == 0x3F10)                      return 0x3F00;
+        if  (addr == 0x3F14)                      return 0x3F04;
+        if  (addr == 0x3F18)                      return 0x3F08;
+        if  (addr == 0x3F1C)                      return 0x3F0C;
+        if ((addr >= 0x3F20) && (addr <= 0x3FFF)) return this.ppu_apply_mirror((addr % 0x0020) + 0x3F00);
+        if  (addr >= 0x3FFF)                      return this.ppu_apply_mirror( addr % 0x4000);
+        return addr;
+    }
+
+    ppu_get_byte(addr){
+        return this.ppu_memory[addr];
+    }
+
+    ppu_set_byte(addr, val){
+        this.ppu_memory[addr] = val;
+    }
+
+    // Returns all the CPU memory in the interval [start, end]
+    memdump(start, end){
         let result = "";
         for (let i = start; i <= end; i++){
-            result += MMAP.get_byte(i).toString(16).padStart(2, "0");
+            // We send in false for the optional argument mod because
+            // we don't want to modify the internal state of the NES when
+            // debugging and reading its state
+            let current_byte = this.get_byte(i, false);
+            // Don't worry if the address is write-only and returns null,
+            // the hx_fmt just writes NN in place of an actual value
+            result += hx_fmt(current_byte);
         }
-        console.log(result);
         return result;
     }
 
-    // Prints out all the PPU memory in the interval [start, end]
-    // Also returns it for use in other utilites/debug purpouses
-    static ppudump(start, end){
+    // Returns all the PPU memory in the interval [start, end]
+    ppudump(start, end){
         let result = "";
         for (let i = start; i <= end; i++){
-            result += MMAP.ppu_memory[i].toString(16).padStart(2, "0");
+            // No such internal state shenanigans in the
+            // PPU address space
+            result += hx_fmt(this.ppu_get_byte(i));
         }
-        console.log(result);
         return result;
     }
 }

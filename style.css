@@ -1,0 +1,17 @@
+html, body{
+    height: 100%;
+    width: 100%;
+    margin: 0%;
+    padding: 0%;
+    overflow: hidden;
+}
+
+canvas{
+    width: 50vh;
+    height: 50vh;
+    margin: 0%;
+    padding: 0%;
+    /*image-rendering: pixelated;*/
+    image-rendering: crisp-edges;
+}
+
