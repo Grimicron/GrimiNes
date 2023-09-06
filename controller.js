@@ -18,9 +18,6 @@ class CONTROLLER{
         // When high (0x01), the state of the controller is
         // continuosly reloaded and read_index reset
         this.strobe_bit   = 0x00;
-        // Since there is no way to get a straight keyboard state
-        // in the browser, we implement it with the keydown and keyup events
-        this.bind_keys();
     }
 
     // This function simply halfs the code size, not much else to it
