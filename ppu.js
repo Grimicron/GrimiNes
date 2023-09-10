@@ -249,8 +249,10 @@ class PPU{
         // P = Palette bits (in reality, the third palette bit will always be 0)
         // C = Color bits
         let buffer  = new Uint8Array(256);
-        let bg_low  = this.nes.mmap.ppu_get_byte(0x2000 |  (this.reg_v & 0x0FFF));
-        let bg_high = this.nes.mmap.ppu_get_byte(0x2000 | ((this.reg_v & 0x0FFF) + 8));
+        let pt_addr = this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF));
+        let fine_y  = (this.reg_v & 0b1110000_00000000) >>> 12;
+        let bg_low  = this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
+        let bg_high = this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
         for (let i = 0; i < 256; i++){
             // Mask out the fine_y bits
             let color     = ((!!(spr_high & (1 << this.fine_x))) << 1) | (!!(spr_low & (1 << this.fine_x)));
@@ -287,10 +289,12 @@ class PPU{
             else{
                 this.fine_x = 0;
                 this.coarse_x_inc();
-                // Re-fetch NT data (we only do it here because NT data
-                // doesn't change until there is a change in coarse X)
-                bg_low    = this.nes.mmap.ppu_get_byte(0x2000 |  (this.reg_v & 0x0FFF));
-                bg_high   = this.nes.mmap.ppu_get_byte(0x2000 | ((this.reg_v & 0x0FFF) + 8));
+                // Re-fetch NT/PT data (we only do it here because they
+                // don't change until there is a change in coarse X)
+                pt_addr = this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF));
+                fine_y  = (this.reg_v & 0b1110000_00000000) >>> 12;
+                bg_low  = this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
+                bg_high = this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
             }
         }
         return buffer;
