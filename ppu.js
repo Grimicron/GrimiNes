@@ -176,7 +176,7 @@ class PPU{
     }
 
     y_inc(){
-        if ((this.reg_v & 0x7000) != 0x7000) this.reg_v += 0x1000;
+        if ((this.reg_v & 0x7000) < 0x7000) this.reg_v += 0x1000;
         else{
             v &= ~0x7000;
             let y = (v & 0x03E0) >> 5;
@@ -192,11 +192,11 @@ class PPU{
 
     // Returns a scanline buffer for the sprites in the current scanline
     sprite_scanline(scan_index){
-        this.sec_oam       =  new Uint8Array(32);
-        let sprite_counter =  0;
-        for (let i = 0; i < 64; i++){
+        this.sec_oam       = new Uint8Array(32);
+        let sprite_counter = 0;
+        for (let i = 0; i < 256; i += 4){
             if (((this.oam[i] + 1) >= scan_index) && ((this.oam[i] + 1) < (scan_index + 8))){
-                for (let j = 0; j < 4; j++) this.sec_oam[(sprite_counter*4) + j] = this.oam[(i*4) + j];
+                for (let j = 0; j < 4; j++) this.sec_oam[(sprite_counter*4) + j] = this.oam[i + j];
                 sprite_counter++;
                 if (sprite_counter >= 8) break;
             }
@@ -249,10 +249,10 @@ class PPU{
         // P = Palette bits (in reality, the third palette bit will always be 0)
         // C = Color bits
         let buffer  = new Uint8Array(256);
-        let pt_addr = this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF));
-        let fine_y  = (this.reg_v & 0b1110000_00000000) >>> 12;
-        let bg_low  = this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
-        let bg_high = this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
+        let pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
+        let fine_y  =  (this.reg_v & 0b1110000_00000000) >>> 12;
+        let bg_low  =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
+        let bg_high =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
         for (let i = 0; i < 256; i++){
             // Mask out the fine_y bits
             let color     = ((!!(spr_high & (1 << this.fine_x))) << 1) | (!!(spr_low & (1 << this.fine_x)));
@@ -285,16 +285,16 @@ class PPU{
             }
             buffer[i] = (palette << 2) | color;
             // X increment
-            if (this.fine_x != 7) this.fine_x++;
+            if (this.fine_x < 7) this.fine_x++;
             else{
                 this.fine_x = 0;
                 this.coarse_x_inc();
                 // Re-fetch NT/PT data (we only do it here because they
                 // don't change until there is a change in coarse X)
-                pt_addr = this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF));
-                fine_y  = (this.reg_v & 0b1110000_00000000) >>> 12;
-                bg_low  = this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
-                bg_high = this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
+                pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
+                fine_y  =  (this.reg_v & 0b1110000_00000000) >>> 12;
+                bg_low  =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
+                bg_high =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
             }
         }
         return buffer;
@@ -336,10 +336,10 @@ class PPU{
             // table, since if the sprite buffer is also transparent,
             // we will save the transparent color (palette doesn't
             // matter) to the mux buffer
-            if      (!bg_buf[i])        mux_buf[i] = spr_buf[i] & 0x1F;
-            else if (!spr_buf[i])       mux_buf[i] = bg_buf[i];
-            else if (spr_buf[i] & 0x20) mux_buf[i] = bg_buf[i];
-            else                        mux_buf[i] = spr_buf[i] & 0x1F;
+            if      (!bg_buf[i])         mux_buf[i] = spr_buf[i] & 0x1F;
+            else if (!spr_buf[i])        mux_buf[i] = bg_buf[i];
+            else if ( spr_buf[i] & 0x20) mux_buf[i] = bg_buf[i];
+            else                         mux_buf[i] = spr_buf[i] & 0x1F;
         }
         // Finally display scanline output
         for (let i = 0; i < 256; i++){
