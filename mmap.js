@@ -7,18 +7,18 @@ class MMAP{
     // IMPORTANT NOTE TO SELF:
     // The PPU has its own address space from 0x0000 to 0x3FFF
     // seperate from the CPU's address space. They communicate
-    // through special memory mapped locations (0x2003: OAMADDR,
-    // 0x2004: OAMDATA, 0x4014: OAMDMA). The address space
-    // 0x0000 - 0x1FFF is where the CHR-ROM is stored (usually
-    // with a mapping system). That space is called the pattern
-    // table.
+    // through special memory mapped locations (0x2000 - 0x2007).
+    // The address space 0x0000 - 0x1FFF is where the CHR-ROM
+    // is stored (usually with a mapping system). That space is
+    // called the pattern table.
 
     constructor(p_nes){
         this.nes = p_nes;
+        // No need to initialize these, they have all their
+        // entries set to 0 by default
         this.cpu_memory = new Uint8Array(MMAP.CPU_MEM_SIZE);
         this.ppu_memory = new Uint8Array(MMAP.PPU_MEM_SIZE);
-        // No need to initialize these to have all their entries
-        // set to 0, they are 0 by default
+        this.nt_mirroring = null;
     }
 
     load_prg_rom_block(rom, rom_addr, mmap_addr){
@@ -29,26 +29,29 @@ class MMAP{
 
     load_prg_rom(rom){
         this.load_prg_rom_block(rom, 0x0010, 0x8000);
-        this.load_prg_rom_block(rom, 0x4010, 0xC000);
     }
 
     load_chr_rom(rom){
         for (let i = 0; i < MMAP.CHR_ROM_BLOCK_SIZE; i++){
-            this.ppu_memory[i] = rom[i + 0x8010];
+            this.ppu_memory[i] = rom[i + 0x4010];
         }
     }
 
     load_rom(rom){
         this.load_prg_rom(rom);
         this.load_chr_rom(rom);
+        // Flag in byte 6 of the ROM tells us if the PPU nametable
+        // should be mirrored vertically (0) or horizontally (1) 
+        this.nt_mirroring = rom[6] & 0x01;
     }
 
     apply_mirrors(addr){
         // See NesDev wiki for a more detailed explanation
         // We do this sort of recursiveness just in case there are
         // multiple layers of mirroring/redirects
-        if ((addr >= 0x800)  && (addr <= 0x1FFF)) return this.apply_mirrors( addr % 0x0800);
+        if ((addr >= 0x0800) && (addr <= 0x1FFF)) return this.apply_mirrors( addr % 0x0800);
         if ((addr >= 0x2008) && (addr <= 0x3FFF)) return this.apply_mirrors((addr % 8) + 0x2000);
+        if ((addr >= 0xC000) && (addr <= 0xFFFF)) return this.apply_mirrors( addr - 0x4000);
         return addr;
     }
 
@@ -138,15 +141,27 @@ class MMAP{
         if  (addr == 0x3F1C)                      return 0x3F0C;
         if ((addr >= 0x3F20) && (addr <= 0x3FFF)) return this.ppu_apply_mirror((addr % 0x0020) + 0x3F00);
         if  (addr >= 0x3FFF)                      return this.ppu_apply_mirror( addr % 0x4000);
+        // Vertical NT mirroring
+        if  (nt_mirroring){
+            // I know I could merge these 2 ifs into 1, but it becomes
+            // a lot less clear what the mirroring actually is
+            if ((addr >= 0x2800) && (addr <= 0x2BFF)) return this.ppu_apply_mirrors(addr - 0x0800);
+            if ((addr >= 0x2C00) && (addr <= 0x2FFF)) return this.ppu_apply_mirrors(addr - 0x0800);
+        }
+        // Horizontal NT mirroring
+        else {
+            if ((addr >= 0x2400) && (addr <= 0x27FF)) return this.ppu_apply_mirrors(addr - 0x0400);
+            if ((addr >= 0x2C00) && (addr <= 0x2FFF)) return this.ppu_apply_mirrors(addr - 0x0400);
+        }
         return addr;
     }
 
     ppu_get_byte(addr){
-        return this.ppu_memory[addr];
+        return this.ppu_memory[this.ppu_apply_mirrors(addr)];
     }
 
     ppu_set_byte(addr, val){
-        this.ppu_memory[addr] = val;
+        this.ppu_memory[this.ppu_apply_mirrors(addr)] = val;
     }
 
     // Returns all the CPU memory in the interval [start, end]

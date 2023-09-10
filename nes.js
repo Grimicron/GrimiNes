@@ -25,13 +25,6 @@ class NES{
     // Not cycle accurate but close enough
     emu_cycle(){
         this.cpu.exec_op();
-        this.ppu.set_status(PPU.VBLANK_POS, 0);
-        this.ppu.render_bg();
-        this.ppu.set_status(PPU.VBLANK_POS, 1);
-        if (this.ppu.reg_ctrl & 0x80){
-            //this.cpu.nmi();
-            debug_log();
-        }
     }
 }
 
