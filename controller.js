@@ -23,28 +23,28 @@ class CONTROLLER{
     // This function simply halfs the code size, not much else to it
     handle_change(key, pressed){
         switch (key){
-            case this.keybind.a:
+            case this.keybinds.a:
                 this.buffer_state[0] = pressed;
                 break;
-            case this.keybind.b:
+            case this.keybinds.b:
                 this.buffer_state[1] = pressed;
                 break;
-            case this.keybind.select:
+            case this.keybinds.select:
                 this.buffer_state[2] = pressed;
                 break;
-            case this.keybind.start:
+            case this.keybinds.start:
                 this.buffer_state[3] = pressed;
                 break;
-            case this.keybind.up:
+            case this.keybinds.up:
                 this.buffer_state[4] = pressed;
                 break;
-            case this.keybind.down:
+            case this.keybinds.down:
                 this.buffer_state[5] = pressed;
                 break;
-            case this.keybind.left:
+            case this.keybinds.left:
                 this.buffer_state[6] = pressed;
                 break;
-            case this.keybind.right:
+            case this.keybinds.right:
                 this.buffer_state[7] = pressed;
                 break;
         }
@@ -80,7 +80,7 @@ class CONTROLLER{
         // We can't increment read_index after we return,
         // so we have to settle for this workaround
         // If it's a debug read, we don't increase read_index
-        if (mod) read_index++;
+        if (mod) this.read_index++;
         // If we increased read_index (mod=true), we need
         // to go one back to see what was actually read
         return this.state[this.read_index-mod];

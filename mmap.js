@@ -18,7 +18,8 @@ class MMAP{
         // entries set to 0 by default
         this.cpu_memory = new Uint8Array(MMAP.CPU_MEM_SIZE);
         this.ppu_memory = new Uint8Array(MMAP.PPU_MEM_SIZE);
-        this.nt_mirroring = null;
+        // First 16 bytes of ROMs contain certain info about it
+        this.rom_flags  = new Uint8Array(0x10);
     }
 
     load_prg_rom_block(rom, rom_addr, mmap_addr){
@@ -28,21 +29,26 @@ class MMAP{
     }
 
     load_prg_rom(rom){
-        this.load_prg_rom_block(rom, 0x0010, 0x8000);
+        if      (this.rom_flags[4] == 1){
+            this.load_prg_rom_block(rom, 0x0010, 0x8000);
+        }
+        else if (this.rom_flags[4] == 2){
+            this.load_prg_rom_block(rom, 0x0010, 0x8000);
+            this.load_prg_rom_block(rom, 0x4010, 0xC000);
+        }
     }
 
     load_chr_rom(rom){
         for (let i = 0; i < MMAP.CHR_ROM_BLOCK_SIZE; i++){
-            this.ppu_memory[i] = rom[i + 0x4010];
+            this.ppu_memory[i] = rom[i + (this.rom_flags[4]*0x4000) + 0x0010];
         }
     }
 
     load_rom(rom){
+        // Load ROM flags
+        for (let i = 0; i < 0x10; i++) this.rom_flags[i] = rom[i];
         this.load_prg_rom(rom);
         this.load_chr_rom(rom);
-        // Flag in byte 6 of the ROM tells us if the PPU nametable
-        // should be mirrored vertically (0) or horizontally (1) 
-        this.nt_mirroring = rom[6] & 0x01;
     }
 
     apply_mirrors(addr){
@@ -51,7 +57,9 @@ class MMAP{
         // multiple layers of mirroring/redirects
         if ((addr >= 0x0800) && (addr <= 0x1FFF)) return this.apply_mirrors( addr % 0x0800);
         if ((addr >= 0x2008) && (addr <= 0x3FFF)) return this.apply_mirrors((addr % 8) + 0x2000);
-        if ((addr >= 0xC000) && (addr <= 0xFFFF)) return this.apply_mirrors( addr - 0x4000);
+        // Mirror 0xC000 - 0xFFFF to 0x8000 - 0xBFFF if the ROM only has 16KB PRG-ROM
+        if ((this.rom_flags[4] == 1)
+         && (addr >= 0xC000) && (addr <= 0xFFFF)) return this.apply_mirrors( addr - 0x4000);
         return addr;
     }
 
@@ -68,7 +76,7 @@ class MMAP{
                 debug_log("Attempted read to PPU_MASK");
                 return null;
             case 0x2002:
-                return this.nes.ppu.get_reg_status();
+                return this.nes.ppu.get_status();
             case 0x2003:
                 // Write only register
                 debug_log("Attempted read to OAM_ADDR");
@@ -98,10 +106,10 @@ class MMAP{
         addr = this.apply_mirrors(addr);
         switch (addr){
             case 0x2000:
-                this.nes.ppu.set_reg_ctrl(val);
+                this.nes.ppu.set_ctrl(val);
                 return;
             case 0x2001:
-                this.nes.ppu.set_reg_mask(val);
+                this.nes.ppu.set_mask(val);
                 return;
             case 0x2002:
                 // Read only register
@@ -114,19 +122,19 @@ class MMAP{
                 this.nes.ppu.set_oam_data(val);
                 return;
             case 0x2005:
-                this.nes.ppu.set_reg_scroll(val);
+                this.nes.ppu.set_scroll(val);
                 return;
             case 0x2006:
-                this.nes.ppu.set_reg_addr(val);
+                this.nes.ppu.set_addr(val);
                 return;
             case 0x2007:
-                this.nes.ppu.set_reg_data(val);
+                this.nes.ppu.set_data(val);
                 return;
             case 0x4014:
-                this.nes.ppu.set_oam_dma(val);
+                this.nes.ppu.oam_dma(val);
                 return;
             case 0x4016:
-                this.nes.ppu.set_strobe(val);
+                this.nes.controller.set_strobe(val);
                 return;
         }
         this.cpu_memory[addr] = val;
@@ -139,10 +147,11 @@ class MMAP{
         if  (addr == 0x3F14)                      return 0x3F04;
         if  (addr == 0x3F18)                      return 0x3F08;
         if  (addr == 0x3F1C)                      return 0x3F0C;
-        if ((addr >= 0x3F20) && (addr <= 0x3FFF)) return this.ppu_apply_mirror((addr % 0x0020) + 0x3F00);
-        if  (addr >= 0x3FFF)                      return this.ppu_apply_mirror( addr % 0x4000);
+        if ((addr >= 0x3F20) && (addr <= 0x3FFF)) return this.ppu_apply_mirrors((addr % 0x0020) + 0x3F00);
+        if  (addr >= 0x3FFF)                      return this.ppu_apply_mirrors( addr % 0x4000);
+        if ((addr >= 0x3000) && (addr <= 0x3EFF)) return this.ppu_apply_mirrors( addr - 0x1000);
         // Vertical NT mirroring
-        if  (nt_mirroring){
+        if  (this.rom_flags[6] & 0x01){
             // I know I could merge these 2 ifs into 1, but it becomes
             // a lot less clear what the mirroring actually is
             if ((addr >= 0x2800) && (addr <= 0x2BFF)) return this.ppu_apply_mirrors(addr - 0x0800);

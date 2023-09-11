@@ -7,10 +7,6 @@ html, body{
 }
 
 canvas{
-    width: 50vh;
-    height: 50vh;
-    margin: 0%;
-    padding: 0%;
     /*image-rendering: pixelated;*/
     image-rendering: crisp-edges;
 }
