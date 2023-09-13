@@ -86,4 +86,3 @@ class CONTROLLER{
         return this.state[this.read_index-mod];
     }
 }
-

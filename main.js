@@ -3,16 +3,21 @@ let canvas    = document.getElementById("screen");
 let ctx       = canvas.getContext("2d");
 let fr        = new FileReader();
 let test_nes  = new NES(ctx);
+
+function frame(){
+    test_nes.emu_cycle_queue();
+    setTimeout(() => { window.requestAnimationFrame(frame) }, 10);
+}
+
 fr.onloadend  = (e) => {
     rom_input.style.display = "none";
     ctx.imageSmoothingEnabled = false;
     ctx.mozImageSmoothingEnabled = false;
     test_nes.init(new Uint8Array(fr.result));
-    window.setInterval(() => {
-        test_nes.emu_cycle();
-    }, 1000 / 1_790_000);
-    //dump_pattern_tables();
+    show_logs = false;
+    window.requestAnimationFrame(frame);
 };
+
 rom_input.onchange = () => {
 	fr.readAsArrayBuffer(rom_input.files[0]);
 };
@@ -24,7 +29,6 @@ function dump_pattern_table(offset){
         "#00FF00",
         "#0000FF",
     ];
-    // Left pattern table
     for (let i = 0; i < 0x100; i++){
         let low_bytes = [];
         let high_bytes = [];
@@ -50,4 +54,3 @@ function dump_pattern_tables(){
     dump_pattern_table(0x0000);
     dump_pattern_table(0x1000);
 }
-

@@ -21,9 +21,9 @@ class PPU{
         // are the only ones needed. The highest 3 bits
         // are used for the fine Y scroll and are masked out
         // when trying to access data
-        this.reg_t = 0x0000;
-        this.reg_v = 0x0000;
-        this.fine_x = 0x0;
+        this.reg_t      = 0x0000;
+        this.reg_v      = 0x0000;
+        this.fine_x     = 0x0;
         // Used for determining write state (first or second write)
         // of PPU_SCROLL and PPU_ADDR. It is shared by those two registers.
         // Cleared upon reading PPU_STATUS
@@ -35,8 +35,11 @@ class PPU{
         // stick with the default of all 0x00)
         this.oam        = new Uint8Array(256);
         this.sec_oam    = new Uint8Array( 32);
+        // Used for keeping track on the PPU's frame rendering stage
+        this.dot_group  = 0;
         // It has to be initialized in a separate function call
         this.palette    = [];
+        this.img_buf    = new ImageData(256, 240);
         this.ctx        = p_ctx;
         this.px_size    = p_px_size;
     }
@@ -51,11 +54,11 @@ class PPU{
     set_ctrl(val){
         this.reg_ctrl = val;
         this.reg_t = (this.reg_t & 0b1110011_11111111) | ((val & 0x03) << 10);
-        if ((this.reg_status & 0x80) && (this.reg_ctrl & 0x80)){
+        if ((this.reg_status & (1 << PPU.VBLANK_POS)) && (this.reg_ctrl & 0x80)){
             // It says on the wiki this happens but I'm not sure
             // if this will totally work because my emulator is not
             // 100% cycle accurate
-            //this.nes.cpu.nmi();
+            this.nes.cpu.req_nmi = true;
         }
     }
 
@@ -110,7 +113,7 @@ class PPU{
     }
 
     set_addr(val){
-        if (this.latch){
+        if (this.latch_w){
             this.reg_t = (this.reg_t & 0b1111111_00000000) | val;
             this.reg_v =  this.reg_t;
             // Same as before with the latch
@@ -150,24 +153,38 @@ class PPU{
 
     load_normal_palette(){
         // Copied from a comment in
-        // https://lospec.com/palette-list/nintendo-entertainment-system
-        this.palette = ["#585858", "#00237C", "#0D1099", "#300092", "#4F006C", "#600035", "#5C0500", "#461800",
-                        "#272D00", "#093E00", "#004500", "#004106", "#003545", "#000000", "#000000", "#000000",
-                        "#A1A1A1", "#0B53D7", "#3337FE", "#6621F7", "#9515BE", "#AC166E", "#A62721", "#864300",
-                        "#596200", "#2D7A00", "#0C8500", "#007F2A", "#006D85", "#000000", "#000000", "#000000",
-                        "#FFFFFF", "#51A5FE", "#8084FE", "#BC6AFE", "#F15BFE", "#FE5EC4", "#FE7269", "#E19321",
-                        "#ADB600", "#79D300", "#51DF21", "#3AD974", "#39C3DF", "#424242", "#000000", "#000000",
-                        "#FFFFFF", "#B5D9FE", "#CACAFE", "#E3BEFE", "#F9B8FE", "#FEBAE7", "#FEC3BC", "#F4D199",
-                        "#DEE086", "#C6EC87", "#B2F29D", "#A7F0C3", "#A8E7F0", "#ACACAC", "#000000", "#000000",];
+        // https://lospec.com/pdlette-list/nintendo-entertainment-system
+        // And formatted this way to make it easier to put into our image buffer
+        this.palette = [[0x58, 0x58, 0x58], [0x00, 0x23, 0x7C], [0x0D, 0x10, 0x99], [0x30, 0x00, 0x92], [0x4F, 0x00, 0x6C], [0x60, 0x00, 0x35], [0x5C, 0x05, 0x00], [0x46, 0x18, 0x00],
+                        [0x27, 0x2D, 0x00], [0x09, 0x3E, 0x00], [0x00, 0x45, 0x00], [0x00, 0x41, 0x06], [0x00, 0x35, 0x45], [0x00, 0x00, 0x00], [0x00, 0x00, 0x00], [0x00, 0x00, 0x00],
+                        [0xA1, 0xA1, 0xA1], [0x0B, 0x53, 0xD7], [0x33, 0x37, 0xFE], [0x66, 0x21, 0xF7], [0x95, 0x15, 0xBE], [0xAC, 0x16, 0x6E], [0xA6, 0x27, 0x21], [0x86, 0x43, 0x00],
+                        [0x59, 0x62, 0x00], [0x2D, 0x7A, 0x00], [0x0C, 0x85, 0x00], [0x00, 0x7F, 0x2A], [0x00, 0x6D, 0x85], [0x00, 0x00, 0x00], [0x00, 0x00, 0x00], [0x00, 0x00, 0x00],
+                        [0xFF, 0xFF, 0xFF], [0x51, 0xA5, 0xFE], [0x80, 0x84, 0xFE], [0xBC, 0x6A, 0xFE], [0xF1, 0x5B, 0xFE], [0xFE, 0x5E, 0xC4], [0xFE, 0x72, 0x69], [0xE1, 0x93, 0x21],
+                        [0xAD, 0xB6, 0x00], [0x79, 0xD3, 0x00], [0x51, 0xDF, 0x21], [0x3A, 0xD9, 0x74], [0x39, 0xC3, 0xDF], [0x42, 0x42, 0x42], [0x00, 0x00, 0x00], [0x00, 0x00, 0x00],
+                        [0xFF, 0xFF, 0xFF], [0xB5, 0xD9, 0xFE], [0xCA, 0xCA, 0xFE], [0xE3, 0xBE, 0xFE], [0xF9, 0xB8, 0xFE], [0xFE, 0xBA, 0xE7], [0xFE, 0xC3, 0xBC], [0xF4, 0xD1, 0x99],
+                        [0xDE, 0xE0, 0x86], [0xC6, 0xEC, 0x87], [0xB2, 0xF2, 0x9D], [0xA7, 0xF0, 0xC3], [0xA8, 0xE7, 0xF0], [0xAC, 0xAC, 0xAC], [0x00, 0x00, 0x00], [0x00, 0x00, 0x00],];
     }
 
+    init_buffer(){
+        for (let i = 0; i < this.img_buf.data.length; i += 4){
+            this.img_buf.data[i + 0] = 0x00;
+            this.img_buf.data[i + 1] = 0x00;
+            this.img_buf.data[i + 2] = 0x00;
+            this.img_buf.data[i + 3] = 0xFF;
+        }
+    }
+    
     put_pixel(x, y, c){
-        this.ctx.fillStyle = c;
-        this.ctx.fillRect(x * this.px_size, y * this.px_size, this.px_size, this.px_size);
+        let i = ((y * this.img_buf.width) + x) * 4;
+        this.img_buf.data[i + 0] = c[0];
+        this.img_buf.data[i + 1] = c[1];
+        this.img_buf.data[i + 2] = c[2];
+        // No need to set alpha, it's always 0xFF and has been initialized
+        // in the init_buffer() function
     }
     
     // These two functions are taken directly from the NesDev wiki
-    // https://www.nesdev.org/wiki/PPU_scrolling
+    // https://www.nesdev.org/wiki/PPU_s-crolling
     // Check there to see why this works
     coarse_x_inc(){
         if ((this.reg_v & 0x001F) == 0x1F){
@@ -348,8 +365,13 @@ class PPU{
             // Start from the base palette address (0x3F00)
             // and simply add the output in the mux buffer to get
             // the color index
+            // There is an exception that 0x3F04, 0x3F08, 0x3F0C
+            // are replaced with 0x3F00, because they aren't actual
+            // mirrors, the can contain their own values, but they
+            // aren't normally used except with a bug
+            if (!(mux_buf[i] & 0x03)) mux_buf[i] = 0x00;
             let col_i = this.nes.mmap.ppu_get_byte(0x3F00 + mux_buf[i]);
-            // Color to be displayed in #RRGGBB format
+            // Color to be displayed in RGB format
             let raw_c = this.palette[col_i];
             this.put_pixel(i, scan_index, raw_c);
         }
@@ -362,5 +384,36 @@ class PPU{
         // since we do 256 increments of it and always reset it once it
         // reaches 8
     }
-}
 
+    exec_dot_group(){
+        // First 240 dot groups render a scanline each
+        if      (this.dot_group <= 239) this.render_scanline();
+        // We do nothing in the post-render scanline, it's just idle
+        // but in the case of our emulator, we can use this dot group to
+        // output out buffer to the canvas
+        else if (this.dot_group == 240) this.ctx.putImageData(this.img_buf, 0, 0);
+        // Start of VBlank period
+        else if (this.dot_group == 241){
+            this.set_status(PPU.VBLANK_POS, 1);
+            if (this.reg_ctrl & 0x80) this.nes.cpu.req_nmi = true;
+        }
+        // Dot groups 242 - 260 are the idle VBlank period
+        else if (this.dot_group <= 260) {}
+        else if (this.dot_group >= 261){
+            // End of VBlank period
+            this.set_status(PPU.VBLANK_POS   , 0);
+            // Other flags are reset too
+            this.set_status(PPU.SPRITEHIT_POS, 0);
+            this.set_status(PPU.OVERFLOW_POS , 0);
+            // Reset v back to t
+            this.reg_v = this.reg_t;
+            // Set it to -1 because it will be actually reset to 0
+            // since there is a this.dot_group++ after this
+            this.dot_group = -1;
+        }
+        // Always increment dot group
+        this.dot_group++;
+        // Amount of dots per dot group
+        return 341;
+    }
+}

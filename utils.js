@@ -8,4 +8,3 @@ function hx_fmt(num, double=false, prefix=false){
     return  (prefix ? "0x" : "")
          + ((num == null) ? "NN" : num.toString(16).padStart(double ? 4 : 2, "0").toUpperCase());
 }
-

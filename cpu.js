@@ -41,7 +41,10 @@ class CPU{
         // it (every program should initalize it properly
         // anyways)
         this.stack_ptr   = 0xFD;
-        this.prg_counter = 0x0000; // It is initialized in reset()
+        // It is initialized in reset()
+        this.prg_counter = 0x0000; 
+        this.req_irq     = false;
+        this.req_nmi     = false;
     }
 
     reset(){
@@ -339,11 +342,11 @@ class CPU{
         // Push low PC
         this.push((this.prg_counter & 0x00FF) >>> 0);
         // Push proc status with B_FLAG set for some goddamn reason???
-        this.set_flag(CPU.B_FLAG, 1);
+        this.set_flag(CPU.B_FLAG, 0);
         this.push(this.proc_status);
         // Again, I guess this is how it's done???
         // Interrupts are confusing as hell
-        this.set_flag(CPU.I_FLAG, 1);
+        this.set_flag(CPU.I_FLAG, 0);
         this.prg_counter = (this.nes.mmap.get_byte(0xFFFF) << 8) | this.nes.mmap.get_byte(0xFFFE);
         return 7;
     }
@@ -355,8 +358,8 @@ class CPU{
         this.push((this.prg_counter & 0xFF00) >>> 8);
         // Push low PC
         this.push((this.prg_counter & 0x00FF) >>> 0);
-        // Push proc status with B_FLAG set for some goddamn reason???
-        this.set_flag(CPU.B_FLAG, 1);
+        // Push proc status with B_FLAG not set for some goddamn reason???
+        this.set_flag(CPU.B_FLAG, 0);
         this.push(this.proc_status);
         // Again, I guess this is how it's done???
         // Interrupts are confusing as hell
@@ -367,6 +370,17 @@ class CPU{
 
     // Returns amount of cycles used to complete instruction
     exec_op(){
+        if      (this.req_nmi){
+            this.req_nmi = false;
+            // Read docs as to why this happens
+            // https://www.nesdev.org/wiki/CPU_interrupts
+            this.req_irq = false;
+            return this.nmi();
+        }
+        else if (this.req_irq){
+            this.req_irq = false;
+            return this.irq();
+        }
         let opcode = this.nes.mmap.get_byte(this.prg_counter);
         // See utils.js as to why we send those two extra arguments
         debug_log(hx_fmt(this.prg_counter, true, true) + ": " + hx_fmt(opcode, false, true));
@@ -380,9 +394,9 @@ class CPU{
             this.push((this.prg_counter & 0xFF00) >>> 8);
             // Push low PC
             this.push((this.prg_counter & 0x00FF) >>> 0);
-            // Push proc status with B_FLAG set for some goddamn reason???
-            this.set_flag(CPU.B_FLAG, 1);
-            this.push(this.proc_status);
+            // Pretty sure that we push with the B Flag set
+            // https://www.nesdev.org/the%20'B'%20flag%20&%20BRK%20instruction.txt
+            this.push(this.proc_status | (1<<CPU.B_FLAG));
             // Again, I guess this is how it's done???
             // Interrupts are confusing as hell
             this.set_flag(CPU.I_FLAG, 1);
@@ -394,7 +408,7 @@ class CPU{
             // For some godforsaken reason
             this.set_flag(CPU.B_FLAG, 0);
             // Make sure order of operations doesn't mess us up
-            this.prg_counter = 0x0000;
+            this.prg_counter  = 0x0000;
             this.prg_counter |= this.pop();
             this.prg_counter |= this.pop() << 8;
             return 6;
@@ -595,9 +609,9 @@ class CPU{
             this.prg_counter = data.addr;
             return 6;
         }
-        // There are 3 primary groups are formated in such a way that
-        // they're AAABBBCC, where AAA identifies the opcode, BBB
-        // its addressing mode and CC the group. Each group of the 
+        // There are 3 primary groups that are formated in such a way
+        // that they're AAABBBCC, where AAA identifies the opcode, BBB
+        // is addressing mode and CC the group. Each group of the 
         // 3 groups has a different way of indicating its addressing mode.
         let op_id        = (opcode & 0xE0) >> 5;
         let op_addr_mode = (opcode & 0x1C) >> 2;
