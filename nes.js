@@ -7,8 +7,8 @@ class NES{
         this.ppu        = new PPU       (this, ctx, 1);
         this.mmap       = new MMAP      (this);
         this.controller = new CONTROLLER(this, {
-            a:      "KeyS"      ,
-            b:      "KeyA"      ,
+            a:      "KeyZ"      ,
+            b:      "KeyX"      ,
             select: "Space"     ,
             start:  "Enter"     ,
             up:     "ArrowUp"   ,
@@ -52,9 +52,9 @@ class NES{
             // CPU cycles along with the PPU dots and make them execute once every 3 dots
             // since a CPU cycle is basically 3 PPU dots
             if ((!(i % 3)) && this.cpu_wait_cycles) this.cpu_wait_cycles--;
-            else                                    this.cpu_wait_cycles = this.cpu.exec_op();
+            else                                    this.cpu_wait_cycles += this.cpu.exec_op();
             if (this.ppu_wait_dots) this.ppu_wait_dots--;
-            else                    this.ppu_wait_dots = this.ppu.exec_dot_group();
+            else                    this.ppu_wait_dots += this.ppu.exec_dot_group();
         }
         this.prev_ts = now_ts;
     }

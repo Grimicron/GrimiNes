@@ -16,6 +16,7 @@ fr.onloadend  = (e) => {
     test_nes.init(new Uint8Array(fr.result));
     show_logs = false;
     window.requestAnimationFrame(frame);
+    //dump_pattern_tables();
 };
 
 rom_input.onchange = () => {

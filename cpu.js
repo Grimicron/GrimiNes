@@ -33,6 +33,12 @@ class CPU{
         this.x_reg       = 0x00;
         this.y_reg       = 0x00;
         // Wiki says it start like this
+        // (0b00111000)
+        // Note that bit 5, the truly unused bit, starts
+        // at 1 and should NEVER be touched again. It doesn't
+        // really matter if it is modified, though
+        // I don't know why the B flag starts as 1, it just
+        // does, I guess
         this.proc_status = 0x34;
         // Stack pointer is actually an 8bit register
         // but the stack is located in 0x0100 - 0x01FF
@@ -97,7 +103,7 @@ class CPU{
         // accumulator is a register, so the instructions which use
         // accumulator addressing mode should handle this exception
         // themselves
-        return {bytes_used: 1, addr: null};
+        return {bytes_used: 0, addr: null};
     }
 
     immediate(){
@@ -121,7 +127,7 @@ class CPU{
         // Second byte of instruction gets the contents of X added to it
         // (carry is ignored) and the resulting pointer points to the data
         // in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.x_reg) & 0x0FF;
+        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.x_reg) & 0xFF;
         return {bytes_used: 1, addr: zp_ptr};
     }
 
@@ -129,7 +135,7 @@ class CPU{
         // Second byte of instruction gets the contents of Y added to it
         // (carry is ignored) and the resulting pointer points to the data
         // in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.y_reg) & 0x0FF;
+        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.y_reg) & 0xFF;
         return {bytes_used: 1, addr: zp_ptr};
     }
 
@@ -138,7 +144,7 @@ class CPU{
         // them and the resulting pointer points to the data (I'm ingoring
         // carry but I don't know if that's how it's done)
         let ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
-        let indexed_ptr = (ptr + this.x_reg) & 0x0FFFF;
+        let indexed_ptr = (ptr + this.x_reg) & 0xFFFF;
         let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
         return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
     }
@@ -148,7 +154,7 @@ class CPU{
         // them and the resulting pointer points to the data (I'm ingoring
         // carry but I don't know if that's how it's done)
         let ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
-        let indexed_ptr = (ptr + this.y_reg) & 0x0FFFF;
+        let indexed_ptr = (ptr + this.y_reg) & 0xFFFF;
         let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
         return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
     }
@@ -171,7 +177,7 @@ class CPU{
 
     indexed_indirect(){ // (addr8, X)
         // Pointer to 16bit pointer stored in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.xreg) & 0x0FF;
+        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.xreg) & 0xFF;
         // 16bit pointer to data in memory
         // I think zp_ptr + 1 should wrap around by ignoring carry but
         // I'm not completely sure
@@ -333,10 +339,8 @@ class CPU{
 
     irq(){
         // I'm actually not sure how many cycles it takes if the
-        // IRQ is masked
+        // IRQ is masked, but probably just 0
         if (this.get_flag(CPU.I_FLAG)) return 0;
-        // Read docs as to why this happens
-        this.prg_counter += 2;
         // Push high PC
         this.push((this.prg_counter & 0xFF00) >>> 8);
         // Push low PC
@@ -344,16 +348,14 @@ class CPU{
         // Push proc status with B_FLAG set for some goddamn reason???
         this.set_flag(CPU.B_FLAG, 0);
         this.push(this.proc_status);
-        // Again, I guess this is how it's done???
-        // Interrupts are confusing as hell
+        // Wiki says that interrupts automatically set the I flag to 1
+        // https://www.nesdev.org/wiki/Status_flags
         this.set_flag(CPU.I_FLAG, 0);
         this.prg_counter = (this.nes.mmap.get_byte(0xFFFF) << 8) | this.nes.mmap.get_byte(0xFFFE);
         return 7;
     }
 
     nmi(){
-        // Read docs as to why this happens
-        this.prg_counter += 2;
         // Push high PC
         this.push((this.prg_counter & 0xFF00) >>> 8);
         // Push low PC
@@ -361,8 +363,8 @@ class CPU{
         // Push proc status with B_FLAG not set for some goddamn reason???
         this.set_flag(CPU.B_FLAG, 0);
         this.push(this.proc_status);
-        // Again, I guess this is how it's done???
-        // Interrupts are confusing as hell
+        // Wiki says that interrupts automatically set the I flag to 1
+        // https://www.nesdev.org/wiki/Status_flags
         this.set_flag(CPU.I_FLAG, 1);
         this.prg_counter = (this.nes.mmap.get_byte(0xFFFB) << 8) | this.nes.mmap.get_byte(0xFFFA);
         return 7;
@@ -370,6 +372,10 @@ class CPU{
 
     // Returns amount of cycles used to complete instruction
     exec_op(){
+        // It's pretty boring to do this wrapping thing on every single
+        // instance where we increase the program counter, so I'll just do
+        // it here
+        this.prg_counter &= 0xFFFF;
         if      (this.req_nmi){
             this.req_nmi = false;
             // Read docs as to why this happens
@@ -397,8 +403,8 @@ class CPU{
             // Pretty sure that we push with the B Flag set
             // https://www.nesdev.org/the%20'B'%20flag%20&%20BRK%20instruction.txt
             this.push(this.proc_status | (1<<CPU.B_FLAG));
-            // Again, I guess this is how it's done???
-            // Interrupts are confusing as hell
+            // Wiki says that interrupts automatically set the I flag to 1
+            // https://www.nesdev.org/wiki/Status_flags
             this.set_flag(CPU.I_FLAG, 1);
             this.prg_counter = (this.nes.mmap.get_byte(0xFFFF) << 8) | this.nes.mmap.get_byte(0xFFFE);
             return 7;
@@ -883,4 +889,3 @@ class CPU{
         return null;
     }
 }
-

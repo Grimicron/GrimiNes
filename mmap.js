@@ -66,36 +66,35 @@ class MMAP{
     get_byte(addr, mod=true){
         addr = this.apply_mirrors(addr);
         // Map to PPU registers
+        // I'm not sure what the write only registers should return
+        // Reading them doesn't mess with the NES, but I don't know
+        // if they return 0 or just stale bus contents
+        // Doesn't really matter, though, no program should read or try
+        // to use the read contents anyways
         switch (addr){
             case 0x2000:
                 // Write only register
-                debug_log("Attempted read to PPU_CTRL");
-                return null;
+                return 0x00;
             case 0x2001:
                 // Write only register
-                debug_log("Attempted read to PPU_MASK");
-                return null;
+                return 0x00;
             case 0x2002:
                 return this.nes.ppu.get_status();
             case 0x2003:
                 // Write only register
-                debug_log("Attempted read to OAM_ADDR");
-                return null;
+                return 0x00;
             case 0x2004:
                 return this.nes.ppu.get_oam_data();
             case 0x2005:
                 // Write only register
-                debug_log("Attempted read to PPU_SCROLL");
-                return null;
+                return 0x00;
             case 0x2006:
                 // Write only register
-                debug_log("Attempted read to PPU_ADDR");
-                return null;
+                return 0x00;
             case 0x2007:
-                return this.nes.ppu.get_reg_data(mod);
+                return this.nes.ppu.get_data(mod);
             case 0x4014:
-                debug_log("Attempted read to OAM_DMA");
-                return null;
+                return 0x00;
             case 0x4016:
                 return this.nes.controller.get_status(mod);
         }
@@ -113,7 +112,8 @@ class MMAP{
                 return;
             case 0x2002:
                 // Read only register
-                debug_log("Attempted write to PPU_STATUS");
+                // Writing to it just doesn't do anything, though, it doesn't
+                // make the NES crash or anything
                 return;
             case 0x2003:
                 this.nes.ppu.set_oam_addr(val);

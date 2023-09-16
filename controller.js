@@ -52,10 +52,14 @@ class CONTROLLER{
 
     bind_keys(){
         document.addEventListener("keydown", (e) => {
+            // Only cancel default and handle event if the key is in our keybinds
+            if (!Object.values(this.keybinds).includes(e.key)) return;
             if (e.cancelable) e.preventDefault();
             this.handle_change(e.key, 0x01);
         });
         document.addEventListener("keyup",   (e) => {
+            // Same as before
+            if (!Object.values(this.keybinds).includes(e.key)) return;
             if (e.cancelable) e.preventDefault();
             this.handle_change(e.key, 0x00);
         });
@@ -79,10 +83,9 @@ class CONTROLLER{
         if (this.read_index >= 0x08) return 0x01;
         // We can't increment read_index after we return,
         // so we have to settle for this workaround
+        let tmp = this.state[this.read_index];
         // If it's a debug read, we don't increase read_index
         if (mod) this.read_index++;
-        // If we increased read_index (mod=true), we need
-        // to go one back to see what was actually read
-        return this.state[this.read_index-mod];
+        return tmp;
     }
 }
