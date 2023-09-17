@@ -74,7 +74,7 @@ class CPU{
     }
 
     get_flag(pos){
-        return (this.proc_status & (1<<pos)) >>> pos;
+        return !!(this.proc_status & (1<<pos));
     }
 
     set_flag(pos, val){
@@ -106,7 +106,7 @@ class CPU{
         return {bytes_used: 0, addr: null};
     }
 
-    immediate(){
+    immediate(){ 
         // Second byte of instruction is the data itself
         return {bytes_used: 1, addr: this.prg_counter+1};
     }
@@ -178,7 +178,7 @@ class CPU{
 
     indexed_indirect(){ // (addr8, X)
         // Pointer to 16bit pointer stored in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.xreg) & 0xFF;
+        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.x_reg) & 0xFF;
         // 16bit pointer to data in memory
         // I think zp_ptr + 1 should wrap around by ignoring carry but
         // I'm not completely sure
@@ -190,17 +190,14 @@ class CPU{
         // This addressing mode is so confusing, just read the docs:
         // https://stackoverflow.com/questions/46262435/indirect-y-indexed-addressing-mode-in-mos-6502
         let zp_ptr = this.nes.mmap.get_byte(this.prg_counter+1);
-        let low = this.nes.mmap.get_byte(zp_ptr) + this.y_reg;
-        let carry = low >>> 8;
-        low &= 0xFF;
-        // I'm really not sure what to do with the carry of zp_ptr + 1 but I think it's
-        // ignored (but I could very much be wrong)
-        let high = (this.nes.mmap.get_byte((zp_ptr+1) & 0xFF) + carry) & 0xFF;
-        let true_ptr = (high << 8) | low;
+        // Pretty sure if zp_ptr is 0xFF, then it wraps around for the high byte and goes to 0x00
+        let true_ptr = (this.nes.mmap.get_byte((zp_ptr + 1) & 0xFF) << 8) | this.nes.mmap.get_byte(zp_ptr);
+        let indexed_ptr = (true_ptr + this.y_reg) & 0xFFFF;
+        let page_cross = (true_ptr>>>8) != (indexed_ptr>>>8);
         // I'm really not sure if that's how the page-crossing works on this addressing
         // mode but it's the only option that made sense to me since I couldn't find much
         // information on this
-        return {bytes_used: 1, addr: true_ptr, page_crossed: carry};
+        return {bytes_used: 1, addr: indexed_ptr, page_crossed: page_cross};
     }
 
     absolute_indirect(){ // (addr16)
@@ -208,7 +205,10 @@ class CPU{
         // in memory where a 16bit pointer is located which points to
         // the data
         let indirect_ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
-        let true_ptr =     (this.nes.mmap.get_byte(indirect_ptr+1)     << 8) | this.nes.mmap.get_byte(indirect_ptr);
+        let true_ptr_low = this.nes.mmap.get_byte(indirect_ptr);
+        // If the indirect pointer is 0x??FF, then it wraps around to 0x??00
+        let true_ptr_high = this.nes.mmap.get_byte((indirect_ptr & 0xFF00) | ((indirect_ptr + 1) & 0x00FF));
+        let true_ptr = (true_ptr_high << 8) | true_ptr_low;
         return {bytes_used: 2, addr: true_ptr};
     }
 
@@ -623,10 +623,9 @@ class CPU{
         let op_id        = (opcode & 0xE0) >> 5;
         let op_addr_mode = (opcode & 0x1C) >> 2;
         let op_group     = (opcode & 0x03) >> 0;
+        let data         = this.group_get_data(op_id, op_addr_mode, op_group);
         // Group 1
         if (op_group == 0x1){
-            // We send op_id because STA has that pesky exception
-            let data = this.group_get_data(op_id, op_addr_mode, 0x1);
             switch (op_id){
                 // Curly braces in the cases because of weird
                 // JS scoping shenanigans
@@ -660,6 +659,7 @@ class CPU{
                     // If I'm being honest, I have no clue why the V flag works,
                     // but it does (seriously, though, how in the world does that
                     // mess equal C6 ^ C7?!)
+                    // Taken from http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
                     this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
                     this.set_flag(CPU.Z_FLAG, !result);
                     this.acc = result;
@@ -709,21 +709,16 @@ class CPU{
         }
         // Group 2
         if (op_group == 0x2){
-            // STX and LDX are exceptions to the pattern, but they
-            // are handled in this function, so no need for weird stuff
-            // here (accumulator mode doesn't return the usual object,
-            // but one with just the cycles)
-            let data = this.group_get_data(op_id, op_addr_mode, 0x2);
             switch (op_id){
                 case 0x0:{ // ASL
                     // Immediate addressing mode not allowed
                     if (op_addr_mode == 0x0) return null;
                     // Handle accumulator addressing mode
                     let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.C_FLAG,  val & 0x80);
-                    val <<= 1;
+                    this.set_flag(CPU.C_FLAG, val & 0x80);
+                    val = (val << 1) & 0xFF;
                     this.set_flag(CPU.Z_FLAG, !val);
-                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
                     // Again handle accumulator addressing mode
                     if (op_addr_mode == 0x2) this.acc = val;
                     else this.nes.mmap.set_byte(data.addr, val);
@@ -736,10 +731,10 @@ class CPU{
                     // Same as before
                     let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
                     let high_bit = val & 0x80;
-                    val = (val << 1) | this.get_flag(CPU.C_FLAG);
-                    this.set_flag(CPU.C_FLAG,  high_bit);
+                    val = ((val << 1) & 0xFF) | this.get_flag(CPU.C_FLAG);
+                    this.set_flag(CPU.C_FLAG, high_bit);
                     this.set_flag(CPU.Z_FLAG, !val);
-                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
                     if (op_addr_mode == 0x2) this.acc = val;
                     else this.nes.mmap.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
@@ -750,8 +745,8 @@ class CPU{
                     if (op_addr_mode == 0x0) return null;
                     // Same as before
                     let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.C_FLAG,  val & 0x01);
-                    val >>>= 1;
+                    this.set_flag(CPU.C_FLAG, val & 0x01);
+                    val = val >>> 1;
                     this.set_flag(CPU.Z_FLAG, !val);
                     // N_FLAG will always be 0 after LSR (obviously!)
                     this.set_flag(CPU.N_FLAG,  0);
@@ -767,8 +762,8 @@ class CPU{
                     let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
                     let low_bit = val & 0x01;
                     val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
-                    this.set_flag(CPU.C_FLAG,  low_bit);
-                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.C_FLAG, low_bit);
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
                     if (op_addr_mode == 0x2) this.acc = val;
                     else this.nes.mmap.set_byte(data.addr, val);
@@ -792,7 +787,7 @@ class CPU{
                     if (op_addr_mode == 0x2) return null;
                     this.x_reg = this.nes.mmap.get_byte(data.addr);
                     this.set_flag(CPU.Z_FLAG, !this.x_reg);
-                    this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
+                    this.set_flag(CPU.N_FLAG, this.x_reg & 0x80);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
                 }
@@ -802,7 +797,7 @@ class CPU{
                       ||(op_addr_mode == 0x2)) return null;
                     let val = this.nes.mmap.get_byte(data.addr);
                     val = (val - 1) & 0xFF;
-                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.nes.mmap.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
@@ -814,7 +809,7 @@ class CPU{
                       ||(op_addr_mode == 0x2)) return null;
                     let val = this.nes.mmap.get_byte(data.addr);
                     val = (val + 1) & 0xFF;
-                    this.set_flag(CPU.N_FLAG,  val & 0x80);
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
                     this.set_flag(CPU.Z_FLAG, !val);
                     this.nes.mmap.set_byte(data.addr, val);
                     this.prg_counter += data.bytes_used + 1;
@@ -824,7 +819,6 @@ class CPU{
         }
         // Group 3
         if (op_group == 0x0){
-            let data = this.group_get_data(op_id, op_addr_mode, 0x0);
             switch (op_id){
                 case 0x1:{ // BIT
                     // This is such a weird instruction
@@ -856,7 +850,7 @@ class CPU{
                 }
                 case 0x5:{ // LDY
                     this.y_reg = this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
+                    this.set_flag(CPU.N_FLAG, this.y_reg & 0x80);
                     this.set_flag(CPU.Z_FLAG, !this.y_reg);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
@@ -869,9 +863,9 @@ class CPU{
                     // & 0xFF at the end because of weird casting signed/unsigned stuff
                     let val = this.nes.mmap.get_byte(data.addr);
                     let result = (this.y_reg - val) & 0xFF;
-                    this.set_flag(CPU.N_FLAG,  result & 0x80);
+                    this.set_flag(CPU.N_FLAG, result & 0x80);
                     this.set_flag(CPU.Z_FLAG, !result);
-                    this.set_flag(CPU.C_FLAG,  this.y_reg >= val);
+                    this.set_flag(CPU.C_FLAG, this.y_reg >= val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
                 }
@@ -883,13 +877,32 @@ class CPU{
                     // & 0xFF at the end because of weird casting signed/unsigned stuff
                     let val = this.nes.mmap.get_byte(data.addr);
                     let result = (this.x_reg - val) & 0xFF;
-                    this.set_flag(CPU.N_FLAG,  result & 0x80);
+                    this.set_flag(CPU.N_FLAG, result & 0x80);
                     this.set_flag(CPU.Z_FLAG, !result);
-                    this.set_flag(CPU.C_FLAG,  this.x_reg >= val);
+                    this.set_flag(CPU.C_FLAG, this.x_reg >= val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
                 }
             }
+        }
+        // Illegal opcodes
+        // These opcodes are not officially documented, but they
+        // are used in some games
+        // I won't implement all of them, just some of the more
+        // stable and common ones
+        if (opcode == 0xEB){ // USBC
+            // Literally the exact same as normal SBC with
+            // immediate addressing mode
+            let val = ones_comp(this.nes.mmap.get_byte(this.immediate().addr));
+            let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+            this.set_flag(CPU.C_FLAG, result > 0xFF);
+            result &= 0xFF;
+            this.set_flag(CPU.N_FLAG, result & 0x80);
+            this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+            this.set_flag(CPU.Z_FLAG, !result);
+            this.acc = result;
+            this.prg_counter += 2;
+            return 2;
         }
         // Instruction not found
         debug_log("Opcode not found");
