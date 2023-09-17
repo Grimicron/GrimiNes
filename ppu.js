@@ -411,7 +411,9 @@ class PPU{
             // mirrors, the can contain their own values, but they
             // aren't normally used except with a bug
             if (!(mux_buf[i] & 0x03)) mux_buf[i] = 0x00;
-            let col_i = this.nes.mmap.ppu_get_byte(0x3F00 + mux_buf[i]);
+            // We mask out the 2 MSBs because they always read back as 0 in
+            // the orignal PPU (it has a 6 bit palette, after all)
+            let col_i = this.nes.mmap.ppu_get_byte(0x3F00 + mux_buf[i]) & 0x3F;
             // Convert colors to the grey-scale palette column if
             // corresponding flag is set
             if (this.reg_mask & 0x01) col_i &= 0x30;

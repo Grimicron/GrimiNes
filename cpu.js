@@ -145,7 +145,7 @@ class CPU{
         // carry but I don't know if that's how it's done)
         let ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
         let indexed_ptr = (ptr + this.x_reg) & 0xFFFF;
-        let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
+        let page_cross = (ptr>>>8) != (indexed_ptr>>>8);
         return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
     }
 
@@ -155,15 +155,16 @@ class CPU{
         // carry but I don't know if that's how it's done)
         let ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
         let indexed_ptr = (ptr + this.y_reg) & 0xFFFF;
-        let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
+        let page_cross = (ptr>>>8) != (indexed_ptr>>>8);
         return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
     }
 
     relative(){
         // Returns the current program counter shifted by the signed byte
         // but pretending it's already at the next instruction (+2)
-        // Convert to 32bit signed by using sign preserving right shift
-        let signed_offset = this.nes.mmap.get_byte(this.prg_counter+1) << 24 >> 24;
+        // Convert to 16 bit signed integer
+        let signed_offset = this.nes.mmap.get_byte(this.prg_counter+1);
+        signed_offset |= (signed_offset & 0x80) ? 0xFF00 : 0x0000;
         // Read note to self above branch instructions implementation
         // as to why this happens
         let ptr = this.prg_counter + 2;
@@ -171,7 +172,7 @@ class CPU{
         // having to deal with that arithmetic and just doing a 16bit
         // mask at the end
         let indexed_ptr = (ptr + signed_offset) & 0xFFFF;
-        let page_cross = (ptr>>>16) != (indexed_ptr>>>16);
+        let page_cross = (ptr>>>8) != (indexed_ptr>>>8);
         return {bytes_used: 1, addr: indexed_ptr, page_crossed: page_cross};
     }
 
@@ -627,7 +628,8 @@ class CPU{
             // We send op_id because STA has that pesky exception
             let data = this.group_get_data(op_id, op_addr_mode, 0x1);
             switch (op_id){
-                // Curly braces in the cases because JS scoping is stupid
+                // Curly braces in the cases because of weird
+                // JS scoping shenanigans
                 case 0x0:{ // ORA
                     this.acc |= this.nes.mmap.get_byte(data.addr);
                     this.set_flag(CPU.N_FLAG, this.acc & 0x80);
@@ -650,13 +652,17 @@ class CPU{
                     return data.cycles;
                 }
                 case 0x3:{ // ADC
-                    let old_sign_bit = this.acc & 0x80;
-                    this.acc += this.nes.mmap.get_byte(data.addr) + this.get_flag(CPU.C_FLAG);
-                    this.set_flag(CPU.C_FLAG,  this.acc > 0xFF);
-                    this.acc &= 0xFF;
-                    this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
-                    this.set_flag(CPU.V_FLAG, (this.acc & 0x80) != old_sign_bit);
-                    this.set_flag(CPU.Z_FLAG, !this.acc);
+                    let val = this.nes.mmap.get_byte(data.addr);
+                    let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                    this.set_flag(CPU.C_FLAG, result > 0xFF);
+                    result &= 0xFF;
+                    this.set_flag(CPU.N_FLAG, result & 0x80);
+                    // If I'm being honest, I have no clue why the V flag works,
+                    // but it does (seriously, though, how in the world does that
+                    // mess equal C6 ^ C7?!)
+                    this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !result);
+                    this.acc = result;
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
                 }
@@ -677,24 +683,25 @@ class CPU{
                     return data.cycles;
                 }
                 case 0x6:{ // CMP
-                    // & 0xFF at the end because of weird casting signed/unsigned stuff
                     let val = this.nes.mmap.get_byte(data.addr);
-                    let result = (this.acc - val) & 0xFF;
-                    this.set_flag(CPU.N_FLAG,  result & 0x80);
+                    let result = this.acc + twos_comp(val);
+                    this.set_flag(CPU.C_FLAG, val <= this.acc);
+                    result &= 0xFF;
+                    this.set_flag(CPU.N_FLAG, result & 0x80);
                     this.set_flag(CPU.Z_FLAG, !result);
-                    this.set_flag(CPU.C_FLAG,  this.acc >= val);
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
                 }
                 case 0x7:{ // SBC
-                    let old_sign_bit = this.acc & 0x80;
-                    let subtrahend = this.nes.mmap.get_byte(data.addr) + this.get_flag(CPU.C_FLAG);
-                    this.set_flag(CPU.C_FLAG,  this.acc >= subtrahend);
-                    // & 0xFF at the end because of weird casting signed/unsigned stuff
-                    this.acc = (this.acc - subtrahend) & 0xFF;
-                    this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
-                    this.set_flag(CPU.V_FLAG, (this.acc & 0x80) != old_sign_bit);
-                    this.set_flag(CPU.Z_FLAG, !this.acc);
+                    // M - N - B = M + ones_comp(N) + C
+                    let val = ones_comp(this.nes.mmap.get_byte(data.addr));
+                    let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                    this.set_flag(CPU.C_FLAG, result > 0xFF);
+                    result &= 0xFF;
+                    this.set_flag(CPU.N_FLAG, result & 0x80);
+                    this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !result);
+                    this.acc = result;
                     this.prg_counter += data.bytes_used + 1;
                     return data.cycles;
                 }
