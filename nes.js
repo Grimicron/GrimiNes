@@ -15,6 +15,15 @@ class NES{
             down:   "ArrowDown" ,
             left:   "ArrowLeft" ,
             right:  "ArrowRight",
+        },{
+            a:      1 ,
+            b:      0 ,
+            select: 8 ,
+            start:  9 ,
+            up:     12,
+            down:   13,
+            left:   14,
+            right:  15,
         });
         this.prev_ts = 0;
         // The CPU returns how many cycles it should take to

@@ -10,8 +10,8 @@ class PPU{
     // How much an emphasized color gains in brightness
     // (and for that matter, how much a non-emphasized one looses)
     // I'm not sure if the emphasis should be additive or multiplicative
-    // but I'm pretty sure it's multiplicative
-    static EMPH_FACT     = 1.25;
+    // but I'm pretty sure it's additive
+    static EMPH_ADD     = 64;
 
     constructor(p_nes, p_ctx, p_px_size){
         this.nes          = p_nes;
@@ -25,7 +25,7 @@ class PPU{
         // actually used for data addressing, since they
         // are the only ones needed. The highest 3 bits
         // are used for the fine Y scroll and are masked out
-        // when trying to access data
+        // when trying to access data in the BG evaluation phase
         this.reg_t        = 0x0000;
         this.reg_v        = 0x0000;
         this.fine_x       = 0x0;
@@ -236,11 +236,10 @@ class PPU{
         }
         // This is where the sprite buffer output will be stored
         // Each byte has the format
-        // UUBPPPCC
-        // U = Unused (0)
-        // B = Priority bit
-        // P = Palette bits (in reality, the third P bit will always be 1)
-        // C = Color bits
+        // TPCCCCCC
+        // T = Transparency bit (1 = opaque, 0 = transparent)
+        // P = Priority bit
+        // C = Palette color
         let buffer    =  new Uint8Array(256);
         // Base pattern table address
         let base_pt   = (this.reg_ctrl & 0x08) << 9;
@@ -267,8 +266,17 @@ class PPU{
                 let color   = ((!!(spr_high & cur_bit)) << 1) | (!!(spr_low & cur_bit));
                 // We only fill the buffer pixel if its transparent, otherwise
                 // keep what was already there
-                if (buffer[this.sec_oam[i+3]+j] & 0x03) continue;
-                buffer[this.sec_oam[i+3]+j] = (this.sec_oam[i+2] & 0x20) | (pal << 2) | color;
+                if (buffer[this.sec_oam[i+3]+j] & 0x80) continue;
+                // Start from the base palette address (0x3F00)
+                // and simply add the final color output to get
+                // the color index
+                let col_i = (pal << 2) | color;
+                // There is an exception that 0x3F04, 0x3F08, 0x3F0C
+                // are replaced with 0x3F00, because they aren't actual
+                // mirrors, the can contain their own values, but they
+                // aren't normally used except with a hardware bug
+                let palette_color = this.nes.mmap.ppu_get_byte(0x3F00 | (color ? col_i : 0x00));
+                buffer[this.sec_oam[i+3]+j] = ((!!color)<<7) | ((this.sec_oam[i+2] & 0x20)<<1) | palette_color;
             }
         }
         // Mask leftmost 8 pixels if corresponding flag is set
@@ -276,18 +284,20 @@ class PPU{
         // sprites should hide immediatly or be 1 scanline delayed, but that
         // situation doesn't really affect functionality and should NEVER happen anyways
         if (!(this.reg_mask & 0x04)){
-            for (let i = 0; i < 8; i++) buffer[i] = 0x00;
+            // Not really sure what color to pick for this, so I'll
+            // just go with a random black
+            for (let i = 0; i < 8; i++) buffer[i] = 0x0F;
         }
         return buffer;
     }
 
     bg_scanline(){
         // This buffer doesn't need a priority bit,
-        // so it will simply be in the format
-        // UUUPPPCC
+        // so the format will be
+        // TUCCCCCC
+        // T = Transparency bit
         // U = Unused (0)
-        // P = Palette bits (in reality, the third palette bit will always be 0)
-        // C = Color bits
+        // C = Palette color
         let buffer  = new Uint8Array(256);
         let pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
         let fine_y  =  (this.reg_v & 0b1110000_00000000) >>> 12;
@@ -322,7 +332,9 @@ class PPU{
             else if (at_sector == 0b11){
                 pal = (at_group & 0b11000000) >>> 6;
             }
-            buffer[i] = (pal << 2) | color;
+            // Explained above, in sprite_scanline()
+            if (!color) pal = 0x00;
+            buffer[i] = ((!!color)<<7) | this.nes.mmap.ppu_get_byte(0x3F00 | (pal << 2) | color);
             // X increment
             if (this.fine_x < 7) this.fine_x++;
             else{
@@ -338,7 +350,8 @@ class PPU{
         }
         // Mask leftmost 8 pixels if corresponding flag is set
         if (!(this.reg_mask & 0x02)){
-            for (let i = 0; i < 8; i++) buffer[i] = 0x00;
+            // Explained above, in sprite_scanline()
+            for (let i = 0; i < 8; i++) buffer[i] = 0x0F;
         }
         return buffer;
     }
@@ -386,16 +399,10 @@ class PPU{
         // Otherwise we apply the mux priority table
         else{
             for (let i = 0; i < 256; i++){
-                // We have to mask out the priotity bit
-                // we saved in the sprite buffer
-                // This if covers the first and second case of the mux
-                // table, since if the sprite buffer is also transparent,
-                // we will save the transparent color (palette doesn't
-                // matter) to the mux buffer
-                if      (!(bg_buf[i] & 0x03))            mux_buf[i] = this.prev_spr_buf[i] & 0x1F;
-                else if (!(this.prev_spr_buf[i] & 0x03)) mux_buf[i] = bg_buf[i];
-                else if (  this.prev_spr_buf[i] & 0x20)  mux_buf[i] = bg_buf[i];
-                else                                     mux_buf[i] = this.prev_spr_buf[i] & 0x1F;
+                if      (!(this.prev_spr_buf[i] & 0x80)) mux_buf[i] = bg_buf[i];
+                else if (!(bg_buf[i]            & 0x80)) mux_buf[i] = this.prev_spr_buf[i];
+                else if (  this.prev_spr_buf[i] & 0x40 ) mux_buf[i] = bg_buf[i];
+                else                                     mux_buf[i] = this.prev_spr_buf[i];
             }
         }
         // Now is a good a time as any to move our current scanline's sprite
@@ -403,40 +410,42 @@ class PPU{
         this.prev_spr_buf = spr_buf;
         // Finally display scanline output
         for (let i = 0; i < 256; i++){
-            // Start from the base palette address (0x3F00)
-            // and simply add the output in the mux buffer to get
-            // the color index
-            // There is an exception that 0x3F04, 0x3F08, 0x3F0C
-            // are replaced with 0x3F00, because they aren't actual
-            // mirrors, the can contain their own values, but they
-            // aren't normally used except with a bug
-            if (!(mux_buf[i] & 0x03)) mux_buf[i] = 0x00;
-            // We mask out the 2 MSBs because they always read back as 0 in
-            // the orignal PPU (it has a 6 bit palette, after all)
-            let col_i = this.nes.mmap.ppu_get_byte(0x3F00 + mux_buf[i]) & 0x3F;
-            // Convert colors to the grey-scale palette column if
-            // corresponding flag is set
+            // We don't want to keep accessing mux_buf[i],
+            // so we'll just save it here
+            // We have to mask out the transparency and
+            // priority we saved in the buffers
+            let col_i = mux_buf[i] & 0x3F;
             if (this.reg_mask & 0x01) col_i &= 0x30;
             // Color to be displayed in RGB format
-            let raw_c = this.palette[col_i];
-            // Apply color emphasis
-            // Red emphasis
-            if (this.reg_mask & 0x20){
-                raw_c[0] = Math.min(raw_c[0] * PPU.EMPH_FACT, 0xFF);
-                raw_c[1] = Math.max(raw_c[1] / PPU.EMPH_FACT, 0x00);
-                raw_c[2] = Math.max(raw_c[2] / PPU.EMPH_FACT, 0x00);
-            }
-            // Green emphasis
-            if (this.reg_mask & 0x40){
-                raw_c[0] = Math.max(raw_c[0] / PPU.EMPH_FACT, 0x00);
-                raw_c[1] = Math.min(raw_c[1] * PPU.EMPH_FACT, 0xFF);
-                raw_c[2] = Math.max(raw_c[2] / PPU.EMPH_FACT, 0x00);
-            }
-            // Blue emphasis
-            if (this.reg_mask & 0x80){
-                raw_c[0] = Math.max(raw_c[0] / PPU.EMPH_FACT, 0x00);
-                raw_c[1] = Math.max(raw_c[1] / PPU.EMPH_FACT, 0x00);
-                raw_c[2] = Math.min(raw_c[2] * PPU.EMPH_FACT, 0xFF);
+            let raw_c = [];
+            // We have to declare raw_c like this because otherwise we will
+            // modify the actual palette color, not the copy of the color in raw_c
+            raw_c[0] = this.palette[col_i][0];
+            raw_c[1] = this.palette[col_i][1];
+            raw_c[2] = this.palette[col_i][2];
+            // Color emphasis only applied to color with low nibble 0-D,
+            // that is to say, every color except blacks (with 0x0D and
+            // 0x1D blacks being the exception, theyre evil)
+            if ((col_i & 0x0F) < 0x0E){
+                // Apply color emphasis
+                // Red emphasis
+                if (this.reg_mask & 0x20){
+                    raw_c[0] = Math.min(raw_c[0] + PPU.EMPH_ADD, 0xFF);
+                    raw_c[1] = Math.max(raw_c[1] - PPU.EMPH_ADD, 0x00);
+                    raw_c[2] = Math.max(raw_c[2] - PPU.EMPH_ADD, 0x00);
+                }
+                // Green emphasis
+                if (this.reg_mask & 0x40){
+                    raw_c[0] = Math.max(raw_c[0] - PPU.EMPH_ADD, 0x00);
+                    raw_c[1] = Math.min(raw_c[1] + PPU.EMPH_ADD, 0xFF);
+                    raw_c[2] = Math.max(raw_c[2] - PPU.EMPH_ADD, 0x00);
+                }
+                // Blue emphasis
+                if (this.reg_mask & 0x80){
+                    raw_c[0] = Math.max(raw_c[0] - PPU.EMPH_ADD, 0x00);
+                    raw_c[1] = Math.max(raw_c[1] - PPU.EMPH_ADD, 0x00);
+                    raw_c[2] = Math.min(raw_c[2] + PPU.EMPH_ADD, 0xFF);
+                }
             }
             this.put_pixel(i, scan_index, raw_c);
         }
@@ -472,9 +481,10 @@ class PPU{
             this.set_status(PPU.OVERFLOW_POS , 0);
             // Reset v back to t
             this.reg_v = this.reg_t;
-            // Set it to -1 because it will be actually reset to 0
-            // since there is a this.dot_group++ after this
-            this.dot_group = -1;
+            // Reset dot group
+            this.dot_group = 0;
+            // Return here to not increase dot group in the later line
+            return 341;
         }
         // Always increment dot group
         this.dot_group++;

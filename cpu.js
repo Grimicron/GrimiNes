@@ -860,7 +860,6 @@ class CPU{
                     // modes not allowed for this instruction
                     if ((op_addr_mode == 0x4)
                       ||(op_addr_mode == 0x5)) return null;
-                    // & 0xFF at the end because of weird casting signed/unsigned stuff
                     let val = this.nes.mmap.get_byte(data.addr);
                     let result = (this.y_reg - val) & 0xFF;
                     this.set_flag(CPU.N_FLAG, result & 0x80);
@@ -874,7 +873,6 @@ class CPU{
                     // modes not allowed for this instruction
                     if ((op_addr_mode == 0x4)
                       ||(op_addr_mode == 0x5)) return null;
-                    // & 0xFF at the end because of weird casting signed/unsigned stuff
                     let val = this.nes.mmap.get_byte(data.addr);
                     let result = (this.x_reg - val) & 0xFF;
                     this.set_flag(CPU.N_FLAG, result & 0x80);

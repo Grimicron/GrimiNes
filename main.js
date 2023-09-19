@@ -1,27 +1,9 @@
-let rom_input = document.getElementById("rom-input");
-let canvas    = document.getElementById("screen");
-let ctx       = canvas.getContext("2d");
-let fr        = new FileReader();
-let test_nes  = new NES(ctx);
-
-function frame(){
-    test_nes.emu_cycle_queue();
-    setTimeout(() => { window.requestAnimationFrame(frame) }, 10);
-}
-
-fr.onloadend  = (e) => {
-    rom_input.style.display = "none";
-    ctx.imageSmoothingEnabled = false;
-    ctx.mozImageSmoothingEnabled = false;
-    test_nes.init(new Uint8Array(fr.result));
-    show_logs = false;
-    window.requestAnimationFrame(frame);
-    //dump_pattern_tables();
-};
-
-rom_input.onchange = () => {
-	fr.readAsArrayBuffer(rom_input.files[0]);
-};
+let rom_input  = null;
+let rom_button = null;
+let canvas     = null;
+let ctx        = null;
+let fr         = null;
+let test_nes   = null;
 
 function dump_pattern_table(offset){
     let palette = [
@@ -55,3 +37,35 @@ function dump_pattern_tables(){
     dump_pattern_table(0x0000);
     dump_pattern_table(0x1000);
 }
+
+function frame(){
+    test_nes.emu_cycle_queue();
+    setTimeout(() => { window.requestAnimationFrame(frame) }, 10);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    rom_input  = document.getElementById("rom-input");
+    rom_button = document.getElementById("rom-button");
+    canvas     = document.getElementById("screen");
+    ctx        = canvas.getContext("2d");
+    fr         = new FileReader();
+    test_nes   = new NES(ctx);
+    canvas.style.display = "none";
+    
+    rom_input.onchange = () => {
+	   fr.readAsArrayBuffer(rom_input.files[0]);
+    };
+    fr.onloadend  = (e) => {
+        canvas.style.display = "block";
+        rom_button.style.display = "none";
+        ctx.imageSmoothingEnabled = false;
+        ctx.mozImageSmoothingEnabled = false;
+        test_nes.init(new Uint8Array(fr.result));
+        show_logs = false;
+        window.requestAnimationFrame(frame);
+        //dump_pattern_tables();
+    };
+    rom_button.onclick = () => {
+        rom_input.click();
+    };
+});

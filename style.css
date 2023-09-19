@@ -4,8 +4,29 @@ html, body{
     margin: 0%;
     padding: 0%;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #1c1c1c;
 }
 
 canvas{
     image-rendering: crisp-edges;
+    margin: 0%;
+    padding: 0%;
+    height: min(100vh, 93.75vw);
+    width: min(106.66vh, 100vw);
+}
+
+input{
+    display: none;
+}
+
+button{
+    background-color: #ffffff;
+    border: none;
+    border-radius: 5px;
+    padding: 10px;
+    margin: 5px;
+    cursor: pointer;
 }
