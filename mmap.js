@@ -137,7 +137,8 @@ class MMAP{
                 this.nes.controller.set_strobe(val);
                 return;
         }
-        this.cpu_memory[addr] = val;
+        // PRG ROM can't be modified
+        if (addr < 0xC000) this.cpu_memory[addr] = val;
     }
 
     ppu_apply_mirrors(addr){

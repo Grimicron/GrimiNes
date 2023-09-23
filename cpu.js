@@ -4,6 +4,9 @@
 // https://www.pagetable.com/c64ref/6502/?tab=2#
 // https://www.nesdev.org/wiki/CPU_ALL
 // https://www.nesdev.org/wiki/CPU_interrupts
+// https://www.masswerk.at/nowgobang/2021/6502-illegal-opcodes
+// https://www.nesdev.org/wiki/Programming_with_unofficial_opcodes
+// https://www.nesdev.org/wiki/CPU_unofficial_opcodes
 
 // IMPORTANT NOTE TO SELF:
 // Even though the MOS6502/Ricoh2A03 are little-endian, the opcode identifier
@@ -22,7 +25,7 @@ class CPU{
     // Bit 5 is physically always set to HIGH (1) in the original CPU
     // Bit 4 (B_FLAG) is set when an interrupt is called depending on the type of
     // interrupt before it's pushed on the stack, but then it's just
-    // discarded when restored (?)
+    // discarded when restored to the processor status
     static B_FLAG = 0x4;
     static V_FLAG = 0x6;
     static N_FLAG = 0x7;
@@ -326,6 +329,67 @@ class CPU{
         return data;
     }
 
+    // For the illegal opcodes with a pattern in
+    // their addressing modes
+    group_ill_get_data(op_id, addr_mode){
+        // There are so many addressing mode and cycle
+        // amount exceptions
+        // SLO, RLA, SRE, RRA, DCP, ISC all follow a nice
+        // pattern, it's just SAX, AHX, LAX, LAS which
+        // cause some trouble
+        // Luckily, SAX and LAX share the same cycle count
+        // for the addressing modes they do share
+        // And then AHX and LAS are pretty simple
+        let data = null;
+        switch(addr_mode){
+            case 0x0:
+                data = this.indexed_indirect();
+                // SAX, LAX exception
+                data.cycles = ((op_id == 4) || (op_id == 5)) ? 6 : 8;
+                break;
+            case 0x1:
+                data = this.zero_page();
+                // SAX, LAX exception
+                data.cycles = ((op_id == 4) || (op_id == 5)) ? 3 : 5;
+                break;
+            case 0x2:
+                // Illegal opcodes with immediate addressing modes
+                // all handle their own cycles
+                data = this.immediate();
+                break;
+            case 0x3:
+                data = this.absolute();
+                // SAX, LAX exception
+                data.cycles = ((op_id == 4) || (op_id == 5)) ? 4 : 6;
+                break;
+            case 0x4:
+                data = this.indirect_indexed();
+                // LAX, AHX exception
+                data.cycles = (op_id == 4) ? 6 : ((op_id == 5) ? (5 + data.page_crossed) : 8);
+                break;
+            case 0x5:
+                // SAX and LAX have addr8, Y instead of addr8, X
+                if ((op_id == 0x4) || (op_id == 0x5)) data = this.indexed_zp_y();
+                else                                  data = this.indexed_zp_x();
+                // SAX, LAX exception
+                data.cycles = ((op_id == 4) || (op_id == 5)) ? 4 : 6;
+                break;
+            case 0x6:
+                data = this.indexed_abs_y();
+                // LAS exception
+                data.cycles = (op_id == 5) ? (4 + data.page_crossed) : 7;
+                break;
+            case 0x7:
+                // AHX and LAX have addr16, Y instead of addr16, X
+                if ((op_id == 0x4) || (op_id == 0x5)) data = this.indexed_abs_y();
+                else                                  data = this.indexed_abs_x();
+                // LAX, AHX exception
+                data.cycles = (op_id == 4) ? 5 : ((op_id == 5) ? (4 + data.page_crossed) : 7);
+                break;
+        }
+        return data;
+    }
+    
     group_get_data(id, addr_mode, group){
         // Opcode ID needed for group 1 since STA is an exception
         if      (group == 0x1) return this.group_one_get_data(id, addr_mode);
@@ -371,6 +435,291 @@ class CPU{
         return 7;
     }
 
+    exec_group_one(op_id, op_addr_mode, data){
+        switch (op_id){
+            // Curly braces in the cases because of weird
+            // JS scoping shenanigans
+            case 0x0:{ // ORA
+                this.acc |= this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x1:{ // AND
+                this.acc &= this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x2:{ // EOR
+                this.acc ^= this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x3:{ // ADC
+                let val = this.nes.mmap.get_byte(data.addr);
+                let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                // If I'm being honest, I have no clue why the V flag works,
+                // but it does (seriously, though, how in the world does that
+                // mess equal C6 ^ C7?!)
+                // Taken from http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
+                this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.acc = result;
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x4:{ // STA
+                // Only exception in group 1, since STA needs an
+                // actual memory address to store the accumulator,
+                // using immediate addressing mode makes no sense
+                if (op_addr_mode == 0x2) return null;
+                this.nes.mmap.set_byte(data.addr, this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x5:{ // LDA
+                this.acc = this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x6:{ // CMP
+                let val = this.nes.mmap.get_byte(data.addr);
+                let result = this.acc + ones_comp(val) + 1;
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x7:{ // SBC
+                // M - N - B = M + ones_comp(N) + C
+                let val = ones_comp(this.nes.mmap.get_byte(data.addr));
+                let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.acc = result;
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+        }
+        return null;
+    }
+
+    exec_group_two(op_id, op_addr_mode, data){
+        switch (op_id){
+            case 0x0:{ // ASL
+                // Immediate addressing mode not allowed
+                if (op_addr_mode == 0x0) return null;
+                // Handle accumulator addressing mode
+                let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.C_FLAG, val & 0x80);
+                val = (val << 1) & 0xFF;
+                this.set_flag(CPU.Z_FLAG, !val);
+                this.set_flag(CPU.N_FLAG, val & 0x80);
+                // Again handle accumulator addressing mode
+                if (op_addr_mode == 0x2) this.acc = val;
+                else this.nes.mmap.set_byte(data.addr, val);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x1:{ // ROL
+                // Immediate addressing mode not allowed
+                if (op_addr_mode == 0x0) return null;
+                // Same as before
+                let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                let high_bit = val & 0x80;
+                val = ((val << 1) & 0xFF) | this.get_flag(CPU.C_FLAG);
+                this.set_flag(CPU.C_FLAG, high_bit);
+                this.set_flag(CPU.Z_FLAG, !val);
+                this.set_flag(CPU.N_FLAG, val & 0x80);
+                if (op_addr_mode == 0x2) this.acc = val;
+                else this.nes.mmap.set_byte(data.addr, val);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x2:{ // LSR
+                // Immediate addressing mode not allowed
+                if (op_addr_mode == 0x0) return null;
+                // Same as before
+                let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.C_FLAG, val & 0x01);
+                val = val >>> 1;
+                this.set_flag(CPU.Z_FLAG, !val);
+                // N_FLAG will always be 0 after LSR (obviously!)
+                this.set_flag(CPU.N_FLAG,  0);
+                if (op_addr_mode == 0x2) this.acc = val;
+                else this.nes.mmap.set_byte(data.addr, val);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x3:{ // ROR
+                // Immediate addressing mode not allowed
+                if (op_addr_mode == 0x0) return null;
+                // Same as before
+                let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                let low_bit = val & 0x01;
+                val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
+                this.set_flag(CPU.C_FLAG, low_bit);
+                this.set_flag(CPU.N_FLAG, val & 0x80);
+                this.set_flag(CPU.Z_FLAG, !val);
+                if (op_addr_mode == 0x2) this.acc = val;
+                else this.nes.mmap.set_byte(data.addr, val);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            // These four next instruction don't support accumulator
+            // mode so no need to worry about that exception
+            case 0x4:{ // STX
+                // Absolute indexed, immediate, accumulator addressing
+                // modes not allowed in this instrucion
+                if ((op_addr_mode == 0x7)
+                  ||(op_addr_mode == 0x0)
+                  ||(op_addr_mode == 0x2)) return null;
+                this.nes.mmap.set_byte(data.addr, this.x_reg);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x5:{ // LDX
+                // Accumulator addressing mode not allowed
+                if (op_addr_mode == 0x2) return null;
+                this.x_reg = this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.Z_FLAG, !this.x_reg);
+                this.set_flag(CPU.N_FLAG, this.x_reg & 0x80);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x6:{ // DEC
+                // Immediate and accumulator addressing modes not allowed
+                if ((op_addr_mode == 0x0)
+                  ||(op_addr_mode == 0x2)) return null;
+                let val = this.nes.mmap.get_byte(data.addr);
+                val = (val - 1) & 0xFF;
+                this.set_flag(CPU.N_FLAG, val & 0x80);
+                this.set_flag(CPU.Z_FLAG, !val);
+                this.nes.mmap.set_byte(data.addr, val);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x7:{ // INC
+                // Immediate and accumulator addressing modes not allowed
+                if ((op_addr_mode == 0x0)
+                  ||(op_addr_mode == 0x2)) return null;
+                let val = this.nes.mmap.get_byte(data.addr);
+                val = (val + 1) & 0xFF;
+                this.set_flag(CPU.N_FLAG, val & 0x80);
+                this.set_flag(CPU.Z_FLAG, !val);
+                this.nes.mmap.set_byte(data.addr, val);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+        }
+        return null;
+    }
+
+    exec_group_three(op_id, op_addr_mode, data){
+        switch (op_id){
+            case 0x1:{ // BIT
+                // This is such a weird instruction
+                // Immediate, zero page indexed, absolute indexed addressing
+                // modes not allowed for this instruction
+                if ((op_addr_mode == 0x0)
+                  ||(op_addr_mode == 0x5)
+                  ||(op_addr_mode == 0x7)) return null;
+                let val = this.nes.mmap.get_byte(data.addr);
+                // I think this is how it's done, but it could
+                // be that its the 7th and 6th bits of the RESULT
+                // of the and between the data and accumulator
+                this.set_flag(CPU.N_FLAG, val & 0x80);
+                this.set_flag(CPU.V_FLAG, val & 0x40);
+                // This one I'm sure of though
+                this.set_flag(CPU.Z_FLAG, !(val & this.acc));
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            // Gap here because I didn't include JMP in group 3
+            case 0x4:{ // STY
+                // Immediate and absolute indexed addressing modes
+                // not allowed for this intruction
+                if ((op_addr_mode == 0x0)
+                  ||(op_addr_mode == 0x7)) return null;
+                this.nes.mmap.set_byte(data.addr, this.y_reg);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x5:{ // LDY
+                this.y_reg = this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.N_FLAG, this.y_reg & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.y_reg);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x6:{ // CPY
+                // Zero page indexed, absolute indexed addressing
+                // modes not allowed for this instruction
+                if ((op_addr_mode == 0x5)
+                  ||(op_addr_mode == 0x7)) return null;
+                let val = this.nes.mmap.get_byte(data.addr);
+                let result = this.y_reg + ones_comp(val) + 1;
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x7:{ // CPX
+                // Zero page indexed, absolute indexed addressing
+                // modes not allowed for this instruction
+                if ((op_addr_mode == 0x5)
+                  ||(op_addr_mode == 0x7)) return null;
+                let val = this.nes.mmap.get_byte(data.addr);
+                let result = this.x_reg + ones_comp(val) + 1;
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+        }
+        return null;
+    }
+    
     // Returns amount of cycles used to complete instruction
     exec_op(){
         // It's pretty boring to do this wrapping thing on every single
@@ -403,7 +752,8 @@ class CPU{
             this.push((this.prg_counter & 0x00FF) >>> 0);
             // Pretty sure that we push with the B Flag set
             // https://www.nesdev.org/the%20'B'%20flag%20&%20BRK%20instruction.txt
-            this.push(this.proc_status | (1<<CPU.B_FLAG));
+            // Remember bit 5 is always high
+            this.push(this.proc_status | (1<<CPU.B_FLAG) | 0b00100000);
             // Wiki says that interrupts automatically set the I flag to 1
             // https://www.nesdev.org/wiki/Status_flags
             this.set_flag(CPU.I_FLAG, 1);
@@ -411,7 +761,8 @@ class CPU{
             return 7;
         }
         if (opcode == 0x40){ // RTI
-            this.proc_status = this.pop();
+            // Remeber bit 5 is always high
+            this.proc_status = this.pop() | 0b00100000;
             // For some godforsaken reason
             this.set_flag(CPU.B_FLAG, 0);
             // Make sure order of operations doesn't mess us up
@@ -431,12 +782,14 @@ class CPU{
         }
         if (opcode == 0x08){ // PHP
             // For some godforsaken reason, PHP pushes the B_FLAG set
-            this.push(this.proc_status | (1<<CPU.B_FLAG));
+            // And also, bit 5 is always high
+            this.push(this.proc_status | (1<<CPU.B_FLAG) | 0b00100000);
             this.prg_counter++;
             return 3;
         }
         if (opcode == 0x28){ // PLP
-            this.proc_status = this.pop();
+            // Remember bit 5 is always high
+            this.proc_status = this.pop() | 0b00100000;
             // For some godforsaken reason
             this.set_flag(CPU.B_FLAG, 0);
             this.prg_counter++;
@@ -624,286 +977,354 @@ class CPU{
         let op_addr_mode = (opcode & 0x1C) >> 2;
         let op_group     = (opcode & 0x03) >> 0;
         let data         = this.group_get_data(op_id, op_addr_mode, op_group);
-        // Group 1
-        if (op_group == 0x1){
-            switch (op_id){
-                // Curly braces in the cases because of weird
-                // JS scoping shenanigans
-                case 0x0:{ // ORA
-                    this.acc |= this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.N_FLAG, this.acc & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !this.acc);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x1:{ // AND
-                    this.acc &= this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.N_FLAG, this.acc & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !this.acc);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x2:{ // EOR
-                    this.acc ^= this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.N_FLAG, this.acc & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !this.acc);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x3:{ // ADC
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    let result = this.acc + val + this.get_flag(CPU.C_FLAG);
-                    this.set_flag(CPU.C_FLAG, result > 0xFF);
-                    result &= 0xFF;
-                    this.set_flag(CPU.N_FLAG, result & 0x80);
-                    // If I'm being honest, I have no clue why the V flag works,
-                    // but it does (seriously, though, how in the world does that
-                    // mess equal C6 ^ C7?!)
-                    // Taken from http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
-                    this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !result);
-                    this.acc = result;
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x4:{ // STA
-                    // Only exception in group 1, since STA needs an
-                    // actual memory address to store the accumulator,
-                    // using immediate addressing mode makes no sense
-                    if (op_addr_mode == 0x2) return null;
-                    this.nes.mmap.set_byte(data.addr, this.acc);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x5:{ // LDA
-                    this.acc = this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.N_FLAG, this.acc & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !this.acc);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x6:{ // CMP
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    let result = this.acc + twos_comp(val);
-                    this.set_flag(CPU.C_FLAG, val <= this.acc);
-                    result &= 0xFF;
-                    this.set_flag(CPU.N_FLAG, result & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !result);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x7:{ // SBC
-                    // M - N - B = M + ones_comp(N) + C
-                    let val = ones_comp(this.nes.mmap.get_byte(data.addr));
-                    let result = this.acc + val + this.get_flag(CPU.C_FLAG);
-                    this.set_flag(CPU.C_FLAG, result > 0xFF);
-                    result &= 0xFF;
-                    this.set_flag(CPU.N_FLAG, result & 0x80);
-                    this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !result);
-                    this.acc = result;
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-            }
-        }
-        // Group 2
-        if (op_group == 0x2){
-            switch (op_id){
-                case 0x0:{ // ASL
-                    // Immediate addressing mode not allowed
-                    if (op_addr_mode == 0x0) return null;
-                    // Handle accumulator addressing mode
-                    let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.C_FLAG, val & 0x80);
-                    val = (val << 1) & 0xFF;
-                    this.set_flag(CPU.Z_FLAG, !val);
-                    this.set_flag(CPU.N_FLAG, val & 0x80);
-                    // Again handle accumulator addressing mode
-                    if (op_addr_mode == 0x2) this.acc = val;
-                    else this.nes.mmap.set_byte(data.addr, val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x1:{ // ROL
-                    // Immediate addressing mode not allowed
-                    if (op_addr_mode == 0x0) return null;
-                    // Same as before
-                    let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
-                    let high_bit = val & 0x80;
-                    val = ((val << 1) & 0xFF) | this.get_flag(CPU.C_FLAG);
-                    this.set_flag(CPU.C_FLAG, high_bit);
-                    this.set_flag(CPU.Z_FLAG, !val);
-                    this.set_flag(CPU.N_FLAG, val & 0x80);
-                    if (op_addr_mode == 0x2) this.acc = val;
-                    else this.nes.mmap.set_byte(data.addr, val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x2:{ // LSR
-                    // Immediate addressing mode not allowed
-                    if (op_addr_mode == 0x0) return null;
-                    // Same as before
-                    let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.C_FLAG, val & 0x01);
-                    val = val >>> 1;
-                    this.set_flag(CPU.Z_FLAG, !val);
-                    // N_FLAG will always be 0 after LSR (obviously!)
-                    this.set_flag(CPU.N_FLAG,  0);
-                    if (op_addr_mode == 0x2) this.acc = val;
-                    else this.nes.mmap.set_byte(data.addr, val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x3:{ // ROR
-                    // Immediate addressing mode not allowed
-                    if (op_addr_mode == 0x0) return null;
-                    // Same as before
-                    let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
-                    let low_bit = val & 0x01;
-                    val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
-                    this.set_flag(CPU.C_FLAG, low_bit);
-                    this.set_flag(CPU.N_FLAG, val & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !val);
-                    if (op_addr_mode == 0x2) this.acc = val;
-                    else this.nes.mmap.set_byte(data.addr, val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                // These four next instruction don't support accumulator
-                // mode so no need to worry about that exception
-                case 0x4:{ // STX
-                    // Absolute indexed, immediate, accumulator addressing
-                    // modes not allowed in this instrucion
-                    if ((op_addr_mode == 0x7)
-                      ||(op_addr_mode == 0x0)
-                      ||(op_addr_mode == 0x2)) return null;
-                    this.nes.mmap.set_byte(data.addr, this.x_reg);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x5:{ // LDX
-                    // Accumulator addressing mode not allowed
-                    if (op_addr_mode == 0x2) return null;
-                    this.x_reg = this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.Z_FLAG, !this.x_reg);
-                    this.set_flag(CPU.N_FLAG, this.x_reg & 0x80);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x6:{ // DEC
-                    // Immediate and accumulator addressing modes not allowed
-                    if ((op_addr_mode == 0x0)
-                      ||(op_addr_mode == 0x2)) return null;
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    val = (val - 1) & 0xFF;
-                    this.set_flag(CPU.N_FLAG, val & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !val);
-                    this.nes.mmap.set_byte(data.addr, val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x7:{ // INC
-                    // Immediate and accumulator addressing modes not allowed
-                    if ((op_addr_mode == 0x0)
-                      ||(op_addr_mode == 0x2)) return null;
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    val = (val + 1) & 0xFF;
-                    this.set_flag(CPU.N_FLAG, val & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !val);
-                    this.nes.mmap.set_byte(data.addr, val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-            }
-        }
-        // Group 3
-        if (op_group == 0x0){
-            switch (op_id){
-                case 0x1:{ // BIT
-                    // This is such a weird instruction
-                    // Immediate, zero page indexed, absolute indexed addressing
-                    // modes not allowed for this instruction
-                    if ((op_addr_mode == 0x0)
-                      ||(op_addr_mode == 0x4)
-                      ||(op_addr_mode == 0x5)) return null;
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    // I think this is how it's done, but it could
-                    // be that its the 7th and 6th bits of the RESULT
-                    // of the and between the data and accumulator
-                    this.set_flag(CPU.N_FLAG, val & 0x80);
-                    this.set_flag(CPU.V_FLAG, val & 0x40);
-                    // This one I'm sure of though
-                    this.set_flag(CPU.Z_FLAG, !(val & this.acc));
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                // Gap here because I didn't include JMP in group 3
-                case 0x4:{ // STY
-                    // Immediate and absolute indexed addressing modes
-                    // not allowed for this intruction
-                    if ((op_addr_mode == 0x0)
-                      ||(op_addr_mode == 0x7)) return null;
-                    this.nes.mmap.set_byte(data.addr, this.y_reg);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x5:{ // LDY
-                    this.y_reg = this.nes.mmap.get_byte(data.addr);
-                    this.set_flag(CPU.N_FLAG, this.y_reg & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !this.y_reg);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x6:{ // CPY
-                    // Zero page indexed, absolute indexed addressing
-                    // modes not allowed for this instruction
-                    if ((op_addr_mode == 0x4)
-                      ||(op_addr_mode == 0x5)) return null;
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    let result = (this.y_reg - val) & 0xFF;
-                    this.set_flag(CPU.N_FLAG, result & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !result);
-                    this.set_flag(CPU.C_FLAG, this.y_reg >= val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-                case 0x7:{ // CPX
-                    // Zero page indexed, absolute indexed addressing
-                    // modes not allowed for this instruction
-                    if ((op_addr_mode == 0x4)
-                      ||(op_addr_mode == 0x5)) return null;
-                    let val = this.nes.mmap.get_byte(data.addr);
-                    let result = (this.x_reg - val) & 0xFF;
-                    this.set_flag(CPU.N_FLAG, result & 0x80);
-                    this.set_flag(CPU.Z_FLAG, !result);
-                    this.set_flag(CPU.C_FLAG, this.x_reg >= val);
-                    this.prg_counter += data.bytes_used + 1;
-                    return data.cycles;
-                }
-            }
+        // If at any point data is null or any of the functions for executing
+        // opcodes in a certain group returns null, it means our opcode is
+        // illegal and we should continue down and handle it there
+        if (data != null){
+            let res = null;
+            if      (op_group == 0x1) res = this.exec_group_one(  op_id, op_addr_mode, data);
+            else if (op_group == 0x2) res = this.exec_group_two(  op_id, op_addr_mode, data);
+            else if (op_group == 0x0) res = this.exec_group_three(op_id, op_addr_mode, data);
+            if (res != null) return res;
         }
         // Illegal opcodes
         // These opcodes are not officially documented, but they
         // are used in some games
-        // I won't implement all of them, just some of the more
-        // stable and common ones
-        if (opcode == 0xEB){ // USBC
-            // Literally the exact same as normal SBC with
-            // immediate addressing mode
-            let val = ones_comp(this.nes.mmap.get_byte(this.immediate().addr));
-            let result = this.acc + val + this.get_flag(CPU.C_FLAG);
-            this.set_flag(CPU.C_FLAG, result > 0xFF);
-            result &= 0xFF;
-            this.set_flag(CPU.N_FLAG, result & 0x80);
-            this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
-            this.set_flag(CPU.Z_FLAG, !result);
-            this.acc = result;
+        // Illegal NOPs
+        // Most of these illegal NOPS perform some sort of fetch
+        if ((opcode == 0x80) // NOP #i
+         || (opcode == 0x82)
+         || (opcode == 0x89)
+         || (opcode == 0xC2)
+         || (opcode == 0xE2)){
+            // Useless immediate byte fetch
+            this.nes.mmap.get_byte(this.immediate().addr);
+            this.prg_counter += 2;
+            return 2;
+         }
+        if ((opcode == 0x04) // NOP zp
+         || (opcode == 0x44)
+         || (opcode == 0x64)){
+            // Useless zero page fetch
+            this.nes.mmap.get_byte(this.zero_page().addr);
+            this.prg_counter += 2;
+            return 3;
+         }
+        if (opcode == 0x0C){ // NOP abs
+            // Useless absolute fetch
+            this.nes.mmap.get_byte(this.absolute().addr);
+            this.prg_counter += 3;
+            return 4;
+        }
+        if ((opcode == 0x14) // NOP zp, X 
+         || (opcode == 0x34)
+         || (opcode == 0x54)
+         || (opcode == 0x74)
+         || (opcode == 0xD4)
+         || (opcode == 0xF4)){
+            // Fetches both zp and zp, X for some reason
+            this.nes.mmap.get_byte(this.zero_page().addr);
+            this.nes.mmap.get_byte(this.indexed_zp_x().addr);
+            this.prg_counter += 2;
+            return 4;
+         }
+        if ((opcode == 0x1C) // NOP abs, X
+         || (opcode == 0x3C)
+         || (opcode == 0x5C)
+         || (opcode == 0x7C)
+         || (opcode == 0xDC)
+         || (opcode == 0xFC)){
+            let data = this.indexed_abs_x();
+            // Fetches from abs, X and abs, X - 256 if a
+            // page boundary is crossed, for some reason
+            this.nes.mmap.get_byte(data.addr);
+            if (data.page_crossed) this.nes.mmap.get_byte((data.addr - 0x100) & 0xFFFF);
+            this.prg_counter += 3;
+            return 4 + data.page_crossed;
+        }
+        // These illegal NOPs don't fetch anything, just
+        // like the real NOP (0xEA)
+        if ((opcode == 0x1A) // NOP
+         || (opcode == 0x3A)
+         || (opcode == 0x5A)
+         || (opcode == 0x7A)
+         || (opcode == 0xDA)
+         || (opcode == 0xFA)){
             this.prg_counter += 2;
             return 2;
         }
-        // Instruction not found
+        if (opcode == 0x9C){ // SHY abs, X
+            // This opcode is really weird and unstable
+            let val = (this.nes.mmap.get_byte(this.prg_counter + 1) + 1) & 0xFF;
+            this.nes.mmap.set_byte(this.indexed_abs_x().addr, this.y_reg & val);
+            this.prg_counter += 3;
+            return 5;
+        }
+        if (opcode == 0x9E){ // SHX abs, Y
+            // Same as the one above but with X and Y switched
+            // And yes, it's just as weird and unstable
+            let val = (this.nes.mmap.get_byte(this.prg_counter + 1) + 1) & 0xFF;
+            this.nes.mmap.set_byte(this.indexed_abs_y().addr, this.x_reg & val);
+            this.prg_counter += 3;
+            return 5;
+        }
+        if ((opcode == 0x02) // KIL
+         || (opcode == 0x12)
+         || (opcode == 0x22)
+         || (opcode == 0x32)
+         || (opcode == 0x42)
+         || (opcode == 0x52)
+         || (opcode == 0x62)
+         || (opcode == 0x72)
+         || (opcode == 0x92)
+         || (opcode == 0xB2)
+         || (opcode == 0xD2)
+         || (opcode == 0xF2)){
+            // Processor lockup, we do nothing
+            // If needed, we could display a special
+            // message on the the screen or do a debug_log
+            return 0;
+        }
+        // Now for the illegal opcodes that follow more of a pattern
+        // The all end with the last two bits being 11 and have a
+        // very clean and neat pattern for their addressing modes
+        // Funnily enough, it's pretty similar to the pattern with the
+        // 3 groups above, we can even reuse some of the variables we
+        // have already defined, almost kind of like a 4th group
+        data = this.group_ill_get_data(op_id, op_addr_mode);
+        // The immediate addressing mode is an exception for basically
+        // ever opcode, so I'll just handle it in a separate if like this
+        if (op_addr_mode == 0x02){
+            switch (op_id){
+                case 0x00: // ANC
+                case 0x01:{
+                    // Both 0x0B and 0x2B do the same thing, so I just
+                    // cascaded them both into this code block
+                    let val = this.acc & this.nes.mmap.get_byte(data.addr);
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
+                    // C flag behaves the same as the N flag in this opcode
+                    this.set_flag(CPU.C_FLAG, val & 0x80);
+                    this.prg_counter += data.bytes_used + 1;
+                    return 2;
+                    break;
+                }
+                case 0x02:{ // ALR
+                    this.acc &= this.nes.mmap.get_byte(data.addr);
+                    this.set_flag(CPU.C_FLAG, this.acc & 0x01);
+                    this.acc >>>= 1;
+                    this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !this.acc);
+                    this.prg_counter += data.bytes_used + 1;
+                    return 2;
+                    break;
+                }
+                case 0x03:{ // ARR
+                    this.acc &= this.nes.mmap.get_byte(data.addr);
+                    this.acc = (this.acc >>> 1) | (this.get_flag(CPU.C_FLAG) << 8);
+                    this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !this.acc);
+                    // Some weird behaviour with C and V flag
+                    this.set_flag(CPU.C_FLAG, this.acc & 0x40);
+                    this.set_flag(CPU.V_FLAG, this.acc & 0x20);
+                    this.prg_counter += data.bytes_used + 1;
+                    return 2;
+                    break;
+                }
+                case 0x04:{ // XAA
+                    // Highly, HIGHLY unstable opcode
+                    // Should never be used and expected to deliver a
+                    // consistent result
+                    // In theory, it does the following:
+                    // (ACC OR CONST) AND X AND #i -> ACC
+                    // Where const is a random value influenced by many
+                    // factors such as temperature
+                    // Const is usually a value like 0x00, 0xFF, 0xEE
+                    // so I'll choose 0xEE for the purpose of this emulator
+                    // Doesn't change any flags
+                    this.acc = (this.acc | 0xEE) & this.x_reg & this.nes.mmap.get_byte(data.addr);
+                    this.prg_counter += data.bytes_used + 1;
+                    return 2;
+                    break;
+                }
+                case 0x05:{ // LXA
+                    // Another VERY unstable opcode involving that magic
+                    // constant from earlier
+                    // Read the opcode above for very similar info about this one
+                    // In theory this should do:
+                    // (ACC OR CONST) AND #i -> ACC, X
+                    this.acc = (this.acc | 0xEE) & this.nes.mmap.get_byte(data.addr);
+                    this.x_reg = this.acc;
+                    this.prg_counter += data.bytes_used + 1;
+                    return 2;
+                    break;
+                }
+                case 0x06:{ // SBX
+                    let val = (this.acc & this.x_reg) + ones_comp(this.nes.mmap.get_byte(data.addr)) + 1;
+                    this.set_flag(CPU.C_FLAG, val & 0x100);
+                    val &= 0xFF;
+                    this.set_flag(CPU.N_FLAG, val & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !val);
+                    this.x_reg = val;
+                    this.prg_counter += data.bytes_used + 1;
+                    return 2;
+                    break;
+                }
+                case 0x07:{ // USBC
+                    // Literally the exact same as normal SBC with
+                    // immediate addressing mode
+                    let val = ones_comp(this.nes.mmap.get_byte(this.immediate().addr));
+                    let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                    this.set_flag(CPU.C_FLAG, result & 0x100);
+                    result &= 0xFF;
+                    this.set_flag(CPU.N_FLAG, result & 0x80);
+                    this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                    this.set_flag(CPU.Z_FLAG, !result);
+                    this.acc = result;
+                    this.prg_counter += 2;
+                    return 2;
+                    break;
+                }
+            }
+        }
+        // Finally, we can do some beautiful opcodes implementations
+        // with pleasing patterns (there are still a handful of
+        // exceptions, though)
+        switch (op_id){
+            case 0x00:{ // SLO
+                let val = this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.C_FLAG, val & 0x80);
+                val = (val << 1) & 0xFF;
+                this.nes.mmap.set_byte(data.addr, val);
+                this.acc |= val;
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x01:{ // RLA
+                let val = this.nes.mmap.get_byte(data.addr);
+                let old_high_bit = val & 0x80;
+                val = (val << 1) | this.get_flag(CPU.C_FLAG);
+                this.set_flag(CPU.C_FLAG, old_high_bit);
+                this.nes.mmap.set_byte(data.addr, val);
+                this.acc &= val;
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x02:{ // SRE
+                let val = this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.C_FLAG, val & 0x01);
+                val >>>= 1;
+                this.nes.mmap.set_byte(data.addr, val);
+                this.acc ^= val;
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x03:{ // RRA
+                let val = this.nes.mmap.get_byte(data.addr);
+                let old_low_bit = val & 0x01;
+                val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
+                this.set_flag(CPU.C_FLAG, old_low_bit);
+                this.nes.mmap.set_byte(data.addr, val);
+                let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.acc = result;
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x04:{ // SAX
+                // This opcode has a couple other exceptions apart from the
+                // immediate addressing mode one
+                if ((op_addr_mode == 0x04) || (op_addr_mode == 0x07)){ // AHX
+                    // Kind of unstable in real hardware, but I will
+                    // implement what should theoritically happen
+                    let val = this.acc & this.x_reg & (this.nes.mmap.get_byte(this.prg_counter + 1) + 1);
+                    this.nes.mmap.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
+                    return data.cycles;
+                    break;
+                }
+                if (op_addr_mode == 0x06){ // TAS
+                    // Weird and unstable opcode, but again, I'll
+                    // implement what is supposed to happen in theory
+                    this.stack_ptr = this.acc & this.x_reg;
+                    let val = this.stack_ptr & (this.nes.mmap.get_byte(this.prg_counter + 1) + 1);
+                    this.nes.mmap.set_byte(data.addr, val);
+                    this.prg_counter += data.bytes_used + 1;
+                    // Hardcoding this exception with only one
+                    // addressing mode to take a bit of workload off
+                    // group_ill_get_data()
+                    return 3;
+                    break;
+                }
+                this.nes.mmap.set_byte(data.addr, this.acc & this.x_reg);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x05:{ // LAX
+                // This opcode has another exception apart from the
+                // one with the immediate addressing mode we covered earlier
+                if (op_addr_mode == 0x06){ // LAS
+                    // Just plain weird opcode and frankly useless for any
+                    // actual coding purpose
+                    let val = this.nes.mmap.get_byte(data.addr) & this.stack_ptr;
+                    this.acc = val;
+                    this.x_reg = val;
+                    this.stack_ptr = val;
+                    this.prg_counter += data.bytes_used + 1;
+                    return data.cycles;
+                    break;
+                }
+                this.acc = this.nes.mmap.get_byte(data.addr);
+                this.set_flag(CPU.N_FLAG, this.acc & 0x80);
+                this.set_flag(CPU.Z_FLAG, !this.acc);
+                this.x_reg = this.acc;
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x06:{ // DCP
+                this.nes.mmap.set_byte(data.addr, (this.nes.mmap.get_byte(data.addr) - 1) & 0xFF);
+                let val = this.nes.mmap.get_byte(data.addr);
+                let result = this.acc + ones_comp(val) + 1;
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+                break;
+            }
+            case 0x07:{ // ISC
+                this.nes.mmap.set_byte(data.addr, (this.nes.mmap.get_byte(data.addr) + 1) & 0xFF);
+                let val = ones_comp(this.nes.mmap.get_byte(data.addr));
+                let result = this.acc + val + this.get_flag(CPU.C_FLAG);
+                this.set_flag(CPU.C_FLAG, result & 0x100);
+                result &= 0xFF;
+                this.set_flag(CPU.N_FLAG, result & 0x80);
+                this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
+                this.set_flag(CPU.Z_FLAG, !result);
+                this.acc = result;
+                this.prg_counter += data.bytes_used + 1;
+                return data.cycles;
+            }
+        }
+        // Instruction not found (somehow?!)
         debug_log("Opcode not found");
-        return null;
+        return 0;
     }
 }

@@ -1,5 +1,5 @@
 // DOCS:
-// NesDev wiki lmao
+// https://www.nesdev.org/wiki/PPU
 // I've sprinkled in some links to it in relevant parts
 // of the code
 
