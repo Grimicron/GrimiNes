@@ -11,9 +11,9 @@ class PPU{
     // (and for that matter, how much a non-emphasized one looses)
     // I'm not sure if the emphasis should be additive or multiplicative
     // but I'm pretty sure it's additive
-    static EMPH_ADD     = 64;
+    static EMPH_FACT     = 1.25;
 
-    constructor(p_nes, p_ctx, p_px_size){
+    constructor(p_nes){
         this.nes          = p_nes;
         this.reg_ctrl     = 0x00;
         this.reg_mask     = 0x00;
@@ -48,9 +48,8 @@ class PPU{
         // of the previous scanline's sprite evaluation to be displayed
         // on thr current scanline
         this.prev_spr_buf = new Uint8Array(256);
-        this.img_buf      = new  ImageData(256, 240);
-        this.ctx          = p_ctx;
-        this.px_size      = p_px_size;
+        this.img_buf      = new Uint8Array(       256 * 240 * 4);
+        this.out_buf      = new Uint8ClampedArray(256 * 240 * 4);
     }
 
     set_status(pos, val){
@@ -62,7 +61,7 @@ class PPU{
 
     set_ctrl(val){
         this.reg_ctrl = val;
-        this.reg_t = (this.reg_t & 0b1110011_11111111) | ((val & 0x03) << 10);
+        this.reg_t = (this.reg_t & 0b11110011_11111111) | ((val & 0x03) << 10);
         if ((this.reg_status & (1 << PPU.VBLANK_POS)) && (this.reg_ctrl & 0x80)){
             // It says on the wiki this happens but I'm not sure
             // if this will totally work because my emulator is not
@@ -107,7 +106,7 @@ class PPU{
 
     set_scroll(val){
         if (this.latch_w){
-            this.reg_t = (this.reg_t & 0b0001100_00011111)
+            this.reg_t = (this.reg_t & 0b10001100_00011111)
                            | ((val & 0b11111000) <<  2)
                            | ((val & 0b00000111) << 12);
             // After second write, the latch resets
@@ -115,7 +114,7 @@ class PPU{
             this.latch_w = 0;
         }
         else{
-            this.reg_t = (this.reg_t & 0b1111111_11100000) | ((val & 0b11111000) >>> 3);
+            this.reg_t = (this.reg_t & 0b11111111_11100000) | ((val & 0b11111000) >>> 3);
             this.fine_x = val & 0x07;
             this.latch_w = 1;
         }
@@ -123,30 +122,28 @@ class PPU{
 
     set_addr(val){
         if (this.latch_w){
-            this.reg_t = (this.reg_t & 0b1111111_00000000) | val;
+            this.reg_t = (this.reg_t & 0b11111111_00000000) | val;
             this.reg_v =  this.reg_t;
             // Same as before with the latch
             this.latch_w = 0;
         }
         else{
             // Most significant bit is cleared
-            this.reg_t = (this.reg_t & 0b0000000_11111111) | ((val & 0b00111111) << 8);
+            this.reg_t = (this.reg_t & 0b10000000_11111111) | ((val & 0b00111111) << 8);
             this.latch_w = 1;
         }
     }
 
-    get_data(mod){
-        let tmp = this.nes.mmap.ppu_get_byte(this.reg_v);
-        // For debugging purposes, we add the option for reading
-        // REG_DATA to not change the internal state
-        if (mod) this.reg_v += (this.reg_ctrl & 0x04) ? 32 : 1;
+    get_data(){
+        let tmp = this.nes.mmap.ppu_get_buffer(this.reg_v & 0b00111111_11111111);
+        this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0b01111111_11111111;
         return tmp;
     }
 
     set_data(val){
         debug_log("PPU_DATA write: " +  hx_fmt(val));
-        this.nes.mmap.ppu_set_byte(this.reg_v, val);
-        this.reg_v += (this.reg_ctrl & 0x04) ? 32 : 1;
+        this.nes.mmap.ppu_set_byte(this.reg_v & 0b00111111_11111111, val);
+        this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0b00111111_11111111;
     }
 
     oam_dma(val){
@@ -154,8 +151,11 @@ class PPU{
         // of 1 cycle but for the purposes of this emulator it doesn't really
         // matter for the purpose of this emulator)
         val <<= 8;
-        for (let i = 0; i < 0x0100; i++){
-            this.oam[(this.oam_addr + i) & 0xFF] = this.nes.mmap.get_byte(val | i);
+        // DMA cannot read anything other than RAM
+        if (val < 0xC000){
+            for (let i = 0; i < 0x0100; i++){
+                this.oam[(this.oam_addr + i) & 0xFF] = this.nes.mmap.get_byte(val | i);
+            }
         }
         // I know it's kinda weird that the PPU and CPU sort of directly interact
         // here, without MMAP as an intermediary, but it is what it is, it's the
@@ -180,21 +180,27 @@ class PPU{
     }
 
     init_buffer(){
-        for (let i = 0; i < this.img_buf.data.length; i += 4){
-            this.img_buf.data[i + 0] = 0x00;
-            this.img_buf.data[i + 1] = 0x00;
-            this.img_buf.data[i + 2] = 0x00;
-            this.img_buf.data[i + 3] = 0xFF;
+        for (let i = 0; i < this.img_buf.length; i += 4){
+            this.img_buf[i + 0] = 0x00;
+            this.img_buf[i + 1] = 0x00;
+            this.img_buf[i + 2] = 0x00;
+            this.img_buf[i + 3] = 0xFF;
         }
     }
     
     put_pixel(x, y, c){
-        let i = ((y * this.img_buf.width) + x) * 4;
-        this.img_buf.data[i + 0] = c[0];
-        this.img_buf.data[i + 1] = c[1];
-        this.img_buf.data[i + 2] = c[2];
+        let i = ((y << 8) + x) * 4;
+        this.img_buf[i + 0] = c[0];
+        this.img_buf[i + 1] = c[1];
+        this.img_buf[i + 2] = c[2];
         // No need to set alpha, it's always 0xFF and has been initialized
         // in the init_buffer() function
+    }
+
+    update_out_buf(){
+        for (let i = 0; i < this.img_buf.length; i++){
+            this.out_buf[i] = this.img_buf[i];
+        }
     }
     
     // These two functions are taken directly from the NesDev wiki
@@ -300,7 +306,7 @@ class PPU{
         // C = Palette color
         let buffer  = new Uint8Array(256);
         let pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
-        let fine_y  =  (this.reg_v & 0b1110000_00000000) >>> 12;
+        let fine_y  =  (this.reg_v & 0b01110000_00000000) >>> 12;
         let bg_low  =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
         let bg_high =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
         for (let i = 0; i < 256; i++){
@@ -343,7 +349,7 @@ class PPU{
                 // Re-fetch NT/PT data (we only do it here because they
                 // don't change until there is a change in coarse X)
                 pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
-                fine_y  =  (this.reg_v & 0b1110000_00000000) >>> 12;
+                fine_y  =  (this.reg_v & 0b01110000_00000000) >>> 12;
                 bg_low  =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
                 bg_high =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
             }
@@ -430,21 +436,21 @@ class PPU{
                 // Apply color emphasis
                 // Red emphasis
                 if (this.reg_mask & 0x20){
-                    raw_c[0] = Math.min(raw_c[0] + PPU.EMPH_ADD, 0xFF);
-                    raw_c[1] = Math.max(raw_c[1] - PPU.EMPH_ADD, 0x00);
-                    raw_c[2] = Math.max(raw_c[2] - PPU.EMPH_ADD, 0x00);
+                    raw_c[0] = Math.min(raw_c[0] * PPU.EMPH_FACT, 0xFF);
+                    raw_c[1] = Math.max(raw_c[1] / PPU.EMPH_FACT, 0x00);
+                    raw_c[2] = Math.max(raw_c[2] / PPU.EMPH_FACT, 0x00);
                 }
                 // Green emphasis
                 if (this.reg_mask & 0x40){
-                    raw_c[0] = Math.max(raw_c[0] - PPU.EMPH_ADD, 0x00);
-                    raw_c[1] = Math.min(raw_c[1] + PPU.EMPH_ADD, 0xFF);
-                    raw_c[2] = Math.max(raw_c[2] - PPU.EMPH_ADD, 0x00);
+                    raw_c[0] = Math.max(raw_c[0] / PPU.EMPH_FACT, 0x00);
+                    raw_c[1] = Math.min(raw_c[1] * PPU.EMPH_FACT, 0xFF);
+                    raw_c[2] = Math.max(raw_c[2] / PPU.EMPH_FACT, 0x00);
                 }
                 // Blue emphasis
                 if (this.reg_mask & 0x80){
-                    raw_c[0] = Math.max(raw_c[0] - PPU.EMPH_ADD, 0x00);
-                    raw_c[1] = Math.max(raw_c[1] - PPU.EMPH_ADD, 0x00);
-                    raw_c[2] = Math.min(raw_c[2] + PPU.EMPH_ADD, 0xFF);
+                    raw_c[0] = Math.max(raw_c[0] / PPU.EMPH_FACT, 0x00);
+                    raw_c[1] = Math.max(raw_c[1] / PPU.EMPH_FACT, 0x00);
+                    raw_c[2] = Math.min(raw_c[2] * PPU.EMPH_FACT, 0xFF);
                 }
             }
             this.put_pixel(i, scan_index, raw_c);
@@ -453,7 +459,7 @@ class PPU{
         // has been rendered
         this.y_inc();
         // Set horizontal component of V to horizontal component of T
-        this.reg_v = (this.reg_v & (~0b0000100_00011111)) | (this.reg_t & 0b0000100_00011111);
+        this.reg_v = (this.reg_v & (~0b10000100_00011111)) | (this.reg_t & 0b10000100_00011111);
         // Fine X should have stayed the same after rendering the scanline
         // since we do 256 increments of it and always reset it once it
         // reaches 8
@@ -462,10 +468,14 @@ class PPU{
     exec_dot_group(){
         // First 240 dot groups render a scanline each
         if      (this.dot_group <= 239) this.render_scanline();
-        // We do nothing in the post-render scanline, it's just idle
-        // but in the case of our emulator, we can use this dot group to
-        // output out buffer to the canvas
-        else if (this.dot_group == 240) this.ctx.putImageData(this.img_buf, 0, 0);
+        // We do nothing in the post-render scanline, it's just idle,
+        // but in the case of our emulator, we can use it to copy the
+        // image buffer to the actual output buffer and keep the FPS metric
+        // up to date
+        else if (this.dot_group == 240){
+            this.update_out_buf();
+            this.nes.count_frame();
+        }
         // Start of VBlank period
         else if (this.dot_group == 241){
             this.set_status(PPU.VBLANK_POS, 1);

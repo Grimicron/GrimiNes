@@ -469,10 +469,8 @@ class CPU{
                 this.set_flag(CPU.C_FLAG, result & 0x100);
                 result &= 0xFF;
                 this.set_flag(CPU.N_FLAG, result & 0x80);
-                // If I'm being honest, I have no clue why the V flag works,
-                // but it does (seriously, though, how in the world does that
-                // mess equal C6 ^ C7?!)
-                // Taken from http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
+                // Formula for V flag taken from
+                // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
                 this.set_flag(CPU.V_FLAG, (this.acc^result) & (val^result) & 0x80);
                 this.set_flag(CPU.Z_FLAG, !result);
                 this.acc = result;

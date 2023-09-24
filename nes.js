@@ -2,9 +2,9 @@ class NES{
     static CPU_CLOCK_HZ = 1_789_773;
     static PPU_CLOCK_HZ = 5_369_318;
     
-    constructor(ctx){
+    constructor(){
         this.cpu        = new CPU       (this);
-        this.ppu        = new PPU       (this, ctx, 1);
+        this.ppu        = new PPU       (this);
         this.mmap       = new MMAP      (this);
         this.controller = new CONTROLLER(this, {
             a:      "KeyZ"      ,
@@ -26,30 +26,47 @@ class NES{
             right:  15,
         });
         this.prev_ts = 0;
+        this.fps_update_ts = 0;
+        // Counts how many full images have been rendered by the
+        // PPU since we emulated the cycle queue
+        this.frame_count = 0;
+        // The HTML element where we can display our FPS metric
+        this.fps_display = null;
         // The CPU returns how many cycles it should take to
         // complete an instruction, so we wait those out to
         // be somewhat cycle-accurate and keep the timings correct
         this.cpu_wait_cycles = 0;
         this.ppu_wait_dots   = 0;
+        this.ctx = null;
     }
 
-    init(rom){
-        this.cpu_cycle_ts = window.performance.now() / 1000;
+    init(p_ctx, rom){
+        this.ctx = p_ctx;
+        this.fps_display = document.getElementById("fps-counter");
+        this.prev_ts = window.performance.now() / 1000;
+        this.fps_update_ts = this.prev_ts;
         this.controller.bind_keys();
+        this.mmap.load_rom_flags(rom);
+        this.mmap.init_mem_mirrors();
+        this.mmap.init_ppu_mirrors();
         this.mmap.load_rom(rom);
         this.ppu.init_buffer();
         this.ppu.load_normal_palette();
         this.cpu.reset();
     }
 
+    update_screen(){
+        this.ctx.putImageData(new ImageData(this.ppu.out_buf, 256, 240), 0, 0);
+    }
+    
     // Not cycle accurate but close enough
     emu_cycle_queue(){
         // / 1000 to convert ms to secs, because since all of the clock speeds are
         // in HZ (cycles / sec), it makes it kinda cleaner
         let now_ts = window.performance.now() / 1000;
         // For now, as a temporary fix for our poor performance, we can just
-        // keep DT low by modding it by 0.5
-        let dt = (now_ts - this.cpu_cycle_ts) % 0.5;
+        // keep DT low by modding it by 0.04
+        let dt = (now_ts - this.prev_ts) % 0.04;
         // Assuming that the time between each frame is basically constant, flooring
         // the amount of cycles (which is probably decimal) and loosing one cycle should'nt
         // cause too many issues since it should catch up eventually and execute an extra
@@ -65,6 +82,19 @@ class NES{
             if (this.ppu_wait_dots) this.ppu_wait_dots--;
             else                    this.ppu_wait_dots += this.ppu.exec_dot_group();
         }
+        this.update_screen();
+        if ((now_ts - this.fps_update_ts) >= 1) this.update_fps(now_ts);
         this.prev_ts = now_ts;
+    }
+
+    count_frame(){
+        this.frame_count++;
+    }
+
+    update_fps(now){
+        let fps = Math.floor(this.frame_count / (now - this.fps_update_ts));
+        this.fps_display.innerHTML = fps + " FPS";
+        this.fps_update_ts = now;
+        this.frame_count = 0;
     }
 }

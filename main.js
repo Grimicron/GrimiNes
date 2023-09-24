@@ -40,7 +40,7 @@ function dump_pattern_tables(){
 
 function frame(){
     test_nes.emu_cycle_queue();
-    setTimeout(() => { window.requestAnimationFrame(frame) }, 10);
+    window.requestAnimationFrame(frame);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -49,7 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
     canvas     = document.getElementById("screen");
     ctx        = canvas.getContext("2d");
     fr         = new FileReader();
-    test_nes   = new NES(ctx);
+    test_nes   = new NES();
     canvas.style.display = "none";
     
     rom_input.onchange = () => {
@@ -60,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
         rom_button.style.display = "none";
         ctx.imageSmoothingEnabled = false;
         ctx.mozImageSmoothingEnabled = false;
-        test_nes.init(new Uint8Array(fr.result));
+        test_nes.init(ctx, new Uint8Array(fr.result));
         show_logs = false;
         window.requestAnimationFrame(frame);
         //dump_pattern_tables();

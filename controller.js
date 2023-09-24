@@ -9,7 +9,7 @@ class CONTROLLER{
         // Controller API properties
         this.gp_connected = false;
         this.gp_binds     = p_gpbinds;
-        this.gamepad      = null;
+        this.gp_index     = 0;
         // Tactile button binds
         this.bt_binds     = p_bt_binds;
         // An array with the state of the controller
@@ -73,7 +73,7 @@ class CONTROLLER{
         // We also set up our controller API listeners here
         window.addEventListener("gamepadconnected",    (e) => {
             this.gp_connected = true;
-            this.gamepad      = navigator.getGamepads()[e.gamepad.index];
+            this.gp_index     = e.gamepad.index;
         });
         window.addEventListener("gamepaddisconnected", (e) => {
             this.gp_connected = false;
@@ -86,21 +86,22 @@ class CONTROLLER{
         // poll the state of the controller, we don't have to do event-based
         // keydown/keyup detection, just use the state of the controller here
         if (this.gp_connected){
+            let gamepad = navigator.getGamepads()[this.gp_index];
             // Use keybinds to set state of buffer_state
-            this.gp_state[0] = !!(this.gamepad.buttons[this.gp_binds.a     ] || {}).pressed;
-            this.gp_state[1] = !!(this.gamepad.buttons[this.gp_binds.b     ] || {}).pressed;
-            this.gp_state[2] = !!(this.gamepad.buttons[this.gp_binds.select] || {}).pressed;
-            this.gp_state[3] = !!(this.gamepad.buttons[this.gp_binds.start ] || {}).pressed;
-            this.gp_state[4] = !!(this.gamepad.buttons[this.gp_binds.up    ] || {}).pressed;
-            this.gp_state[5] = !!(this.gamepad.buttons[this.gp_binds.down  ] || {}).pressed;
-            this.gp_state[6] = !!(this.gamepad.buttons[this.gp_binds.left  ] || {}).pressed;
-            this.gp_state[7] = !!(this.gamepad.buttons[this.gp_binds.right ] || {}).pressed;
+            this.gp_state[0] = !!(gamepad.buttons[this.gp_binds.a     ] || {}).pressed;
+            this.gp_state[1] = !!(gamepad.buttons[this.gp_binds.b     ] || {}).pressed;
+            this.gp_state[2] = !!(gamepad.buttons[this.gp_binds.select] || {}).pressed;
+            this.gp_state[3] = !!(gamepad.buttons[this.gp_binds.start ] || {}).pressed;
+            this.gp_state[4] = !!(gamepad.buttons[this.gp_binds.up    ] || {}).pressed;
+            this.gp_state[5] = !!(gamepad.buttons[this.gp_binds.down  ] || {}).pressed;
+            this.gp_state[6] = !!(gamepad.buttons[this.gp_binds.left  ] || {}).pressed;
+            this.gp_state[7] = !!(gamepad.buttons[this.gp_binds.right ] || {}).pressed;
             // Also use state of axes to update the buffer_state
-            if (this.gamepad.axes.length == 2){
-                if      (this.gamepad.axes[0] >=  0.75) this.gp_state[7] = 0x01;
-                else if (this.gamepad.axes[0] <= -0.75) this.gp_state[6] = 0x01;
-                if      (this.gamepad.axes[1] >=  0.75) this.gp_state[5] = 0x01;
-                else if (this.gamepad.axes[1] <= -0.75) this.gp_state[4] = 0x01;
+            if (gamepad.axes.length >= 2){
+                if      (gamepad.axes[0] >=  0.75) this.gp_state[7] = 0x01;
+                else if (gamepad.axes[0] <= -0.75) this.gp_state[6] = 0x01;
+                if      (gamepad.axes[1] >=  0.75) this.gp_state[5] = 0x01;
+                else if (gamepad.axes[1] <= -0.75) this.gp_state[4] = 0x01;
             }
         }
         for (let i = 0; i < this.state.length; i++){
@@ -115,16 +116,15 @@ class CONTROLLER{
         if (this.strobe_bit) this.update();
     }
 
-    get_status(mod){
+    get_status(){
         if (this.strobe_bit) this.update();
         // Always return 0x01 when all the status bits
-        // have been read (in the original controller)
+        // have been read (happens in the original controller)
         if (this.read_index >= 0x08) return 0x01;
         // We can't increment read_index after we return,
         // so we have to settle for this workaround
         let tmp = this.state[this.read_index];
-        // If it's a debug read, we don't increase read_index
-        if (mod) this.read_index++;
+        this.read_index++;
         return tmp;
     }
 }
