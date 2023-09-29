@@ -5,7 +5,7 @@ function twos_comp(n){
     return (0x100 - n) & 0xFF;
 }
 
-// Return the 8-bit signed one's complement of the given number
+// Returns the 8-bit signed one's complement of the given number
 function ones_comp(n){
     return 0xFF - n;
 }

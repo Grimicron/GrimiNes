@@ -740,7 +740,9 @@ class CPU{
         debug_log(hx_fmt(this.prg_counter, true, true) + ": " + hx_fmt(opcode, false, true));
         // Check for all the single byte instructions since they don't really
         // fit any pattern
+        // These first 3 instruction all perform a dummy fetch to the next byte
         if (opcode == 0x00){ // BRK
+            this.nes.mmap.get_byte(this.prg_counter+1);
             // I think I_FLAG only blocks external IRQs
             // Read docs as to why this happens
             this.prg_counter += 2;
@@ -759,6 +761,7 @@ class CPU{
             return 7;
         }
         if (opcode == 0x40){ // RTI
+            this.nes.mmap.get_byte(this.prg_counter+1);
             // Remeber bit 5 is always high
             this.proc_status = this.pop() | 0b00100000;
             // For some godforsaken reason
@@ -770,6 +773,7 @@ class CPU{
             return 6;
         }
         if (opcode == 0x60){ // RTS
+            this.nes.mmap.get_byte(this.prg_counter+1);
             // Make sure order of operations doesn't mess up
             this.prg_counter = 0x0000;
             this.prg_counter |= this.pop();

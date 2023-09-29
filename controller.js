@@ -10,8 +10,6 @@ class CONTROLLER{
         this.gp_connected = false;
         this.gp_binds     = p_gpbinds;
         this.gp_index     = 0;
-        // Tactile button binds
-        this.bt_binds     = p_bt_binds;
         // An array with the state of the controller
         // since it was last updated
         // It's in the order laid out above

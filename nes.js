@@ -1,6 +1,7 @@
 class NES{
     static CPU_CLOCK_HZ = 1_789_773;
     static PPU_CLOCK_HZ = 5_369_318;
+    static MAX_OVERDUE_COMPUTING = 0.02;
     
     constructor(){
         this.cpu        = new CPU       (this);
@@ -16,10 +17,10 @@ class NES{
             left:   "ArrowLeft" ,
             right:  "ArrowRight",
         },{
-            a:      1 ,
-            b:      0 ,
-            select: 8 ,
-            start:  9 ,
+            a:       1,
+            b:       0,
+            select:  8,
+            start:   9,
             up:     12,
             down:   13,
             left:   14,
@@ -46,9 +47,6 @@ class NES{
         this.prev_ts = window.performance.now() / 1000;
         this.fps_update_ts = this.prev_ts;
         this.controller.bind_keys();
-        this.mmap.load_rom_flags(rom);
-        this.mmap.init_mem_mirrors();
-        this.mmap.init_ppu_mirrors();
         this.mmap.load_rom(rom);
         this.ppu.init_buffer();
         this.ppu.load_normal_palette();
@@ -64,9 +62,7 @@ class NES{
         // / 1000 to convert ms to secs, because since all of the clock speeds are
         // in HZ (cycles / sec), it makes it kinda cleaner
         let now_ts = window.performance.now() / 1000;
-        // For now, as a temporary fix for our poor performance, we can just
-        // keep DT low by modding it by 0.04
-        let dt = (now_ts - this.prev_ts) % 0.04;
+        let dt = Math.min(now_ts - this.prev_ts, NES.MAX_OVERDUE_COMPUTING);
         // Assuming that the time between each frame is basically constant, flooring
         // the amount of cycles (which is probably decimal) and loosing one cycle should'nt
         // cause too many issues since it should catch up eventually and execute an extra

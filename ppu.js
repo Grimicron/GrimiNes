@@ -47,7 +47,7 @@ class PPU{
         // Since sprites are drawn one scanline delayed, we need a buffer
         // of the previous scanline's sprite evaluation to be displayed
         // on thr current scanline
-        this.prev_spr_buf = new Uint8Array(256);
+        this.prev_spr_buf = { buf: new Uint8Array(256), sprz: new Uint8Array(256) };
         this.img_buf      = new Uint8Array(       256 * 240 * 4);
         this.out_buf      = new Uint8ClampedArray(256 * 240 * 4);
     }
@@ -229,15 +229,37 @@ class PPU{
         }
     }
 
+    spr_in_scanline(y, scan_index, spr_size){
+        return (y <= scan_index) && (y >= Math.max(scan_index - spr_size + 1, 0));
+    }
+
     // Returns a scanline buffer for the sprites in the current scanline
+    // and an array indicating which pixels of the scanline contain an opaque
+    // pixel belonging to the sprite index 0
     sprite_scanline(scan_index){
-        this.sec_oam       = new Uint8Array(32);
-        let sprite_counter = 0;
+        this.sec_oam        = new Uint8Array(32);
+        let spr_size        = (this.reg_ctrl & 0x20) ? 16 : 8;
+        let sprite_counter  = 0;
+        // Index in the secondary OAM of the sprite index 0 in the OAM
+        let sprz_index      = -1;
+        // Sprite overflow flag has a weird bug, read more about it here:
+        // https://www.nesdev.org/wiki/PPU_sprite_evaluation
+        let spro_bug_offset = 0;
         for (let i = 0; i < 256; i += 4){
-            if ((this.oam[i] <= scan_index) && (this.oam[i] > Math.max(0, scan_index - 8))){
-                for (let j = 0; j < 4; j++) this.sec_oam[(sprite_counter*4) + j] = this.oam[i + j];
-                sprite_counter++;
-                if (sprite_counter >= 8) break;
+            if (sprite_counter == 32){
+                let spr_y = this.oam[i + spro_bug_offset];
+                if (this.spr_in_scanline(spr_y, scan_index, spr_size)){
+                    this.set_status(PPU.OVERFLOW_POS, 1);
+                }
+                spro_bug_offset = (spro_bug_offset + 1) % 4;
+                // We don't go to the logic for adding sprites to the secondary OAM
+                // if we already fully filled it
+                continue;
+            }
+            if (this.spr_in_scanline(this.oam[i], scan_index, spr_size)){
+                for (let j = 0; j < 4; j++) this.sec_oam[sprite_counter + j] = this.oam[i + j];
+                if (i == 0) sprz_index = sprite_counter;
+                sprite_counter += 4;
             }
         }
         // This is where the sprite buffer output will be stored
@@ -246,21 +268,28 @@ class PPU{
         // T = Transparency bit (1 = opaque, 0 = transparent)
         // P = Priority bit
         // C = Palette color
-        let buffer    =  new Uint8Array(256);
+        let buffer      = new Uint8Array(256);
+        let sprz_pixels = new Uint8Array(256);
         // Base pattern table address
         let base_pt   = (this.reg_ctrl & 0x08) << 9;
         // Making i increase by 4 saves so many multiplications
-        for (let i = 0; i < sprite_counter*4; i += 4){
+        for (let i = 0; i < sprite_counter; i += 4){
             // Specifies the strip of the sprite which will be
             // drawn on the scanline as an offset from the base
             // pattern table address
             let spr_offset = scan_index - this.sec_oam[i];
             // Vertical sprite flip
-            if (this.sec_oam[i+2] & 0x80) spr_offset = 7 - spr_offset;
+            if (this.sec_oam[i+2] & 0x80) spr_offset = spr_size - spr_offset - 1;
+            // For a more detailed explanation of pattern table fetching for OAM
+            // sprites, see the wiki page:
+            // https://www.nesdev.org/wiki/PPU_OAM#Byte_1
+            let spr_pt = (spr_size == 8)
+                       ? (((this.reg_ctrl     & 0x08) <<  9) |  (this.sec_oam[i+1]         << 4) | spr_offset)
+                       : (((this.sec_oam[i+1] & 0x01) << 12) | ((this.sec_oam[i+1] & 0xFE) << 5) | spr_offset);
             // Low byte of sprite color
-            let spr_low    =  this.nes.mmap.ppu_get_byte(base_pt | (this.sec_oam[i+1]<<4) |  spr_offset     );
+            let spr_low    =  this.nes.mmap.ppu_get_byte(spr_pt    );
             // High byte of sprite color
-            let spr_high   =  this.nes.mmap.ppu_get_byte(base_pt | (this.sec_oam[i+1]<<4) | (spr_offset + 8));
+            let spr_high   =  this.nes.mmap.ppu_get_byte(spr_pt + 8);
             // Palette number of the sprite
             let pal        = (this.sec_oam[i+2] & 0x03) + 4;
             // Saves a handful of operations and makes the code more readable
@@ -282,6 +311,7 @@ class PPU{
                 // mirrors, the can contain their own values, but they
                 // aren't normally used except with a hardware bug
                 let palette_color = this.nes.mmap.ppu_get_byte(0x3F00 | (color ? col_i : 0x00));
+                if ((i == sprz_index) && color) sprz_pixels[this.sec_oam[i+3]+j] = 0x01;
                 buffer[this.sec_oam[i+3]+j] = ((!!color)<<7) | ((this.sec_oam[i+2] & 0x20)<<1) | palette_color;
             }
         }
@@ -292,9 +322,12 @@ class PPU{
         if (!(this.reg_mask & 0x04)){
             // Not really sure what color to pick for this, so I'll
             // just go with a random black
-            for (let i = 0; i < 8; i++) buffer[i] = 0x0F;
+            for (let i = 0; i < 8; i++){
+                buffer[i] = 0x0F;
+                sprz_pixels[i] = 0x00;
+            }
         }
-        return buffer;
+        return { buf: buffer, sprz: sprz_pixels };
     }
 
     bg_scanline(){
@@ -378,7 +411,7 @@ class PPU{
     render_scanline(){
         let scan_index = this.calc_scan_index();
         // If rendering is disabled, we don't even perform accesses to the VRAM
-        let spr_buf    = new Uint8Array(256);
+        let spr_buf    = { buf: new Uint8Array(256), sprz: new Uint8Array(256) };
         let bg_buf     = new Uint8Array(256);
         // Only if either of the show flags are set do we perform our VRAM our OAM accesses
         // and then mask out whichever parts we shouldn't show
@@ -400,15 +433,22 @@ class PPU{
         let mux_buf        = new Uint8Array(256);
         // If either BG or sprites are masked, we fill the
         // mux buffer with the other one
-        if      (!(this.reg_mask & 0x08)) mux_buf = this.prev_spr_buf;
+        if      (!(this.reg_mask & 0x08)) mux_buf = this.prev_spr_buf.buf;
         else if (!(this.reg_mask & 0x10)) mux_buf = bg_buf;
         // Otherwise we apply the mux priority table
         else{
             for (let i = 0; i < 256; i++){
-                if      (!(this.prev_spr_buf[i] & 0x80)) mux_buf[i] = bg_buf[i];
-                else if (!(bg_buf[i]            & 0x80)) mux_buf[i] = this.prev_spr_buf[i];
-                else if (  this.prev_spr_buf[i] & 0x40 ) mux_buf[i] = bg_buf[i];
-                else                                     mux_buf[i] = this.prev_spr_buf[i];
+                if      (!(this.prev_spr_buf.buf[i] & 0x80)) mux_buf[i] = bg_buf[i];
+                else if (!(bg_buf[i]                & 0x80)) mux_buf[i] = this.prev_spr_buf.buf[i];
+                else if (  this.prev_spr_buf.buf[i] & 0x40 ) mux_buf[i] = bg_buf[i];
+                else                                         mux_buf[i] = this.prev_spr_buf.buf[i];
+            }
+            // Calculate if we should set sprite-hit-0 flag
+            for (let i = 0; i < 256; i++){
+                if (spr_buf.sprz[i] && bg_buf[i]){
+                    this.set_status(PPU.SPRITEHIT_POS, 1);
+                    break;
+                }
             }
         }
         // Now is a good a time as any to move our current scanline's sprite
