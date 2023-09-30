@@ -12,6 +12,7 @@ html, body{
 
 canvas{
     image-rendering: crisp-edges;
+    display: none;
     margin: 0%;
     padding: 0%;
     width: min(106.66vh, 100vw);

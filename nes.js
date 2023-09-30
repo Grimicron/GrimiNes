@@ -8,8 +8,8 @@ class NES{
         this.ppu        = new PPU       (this);
         this.mmap       = new MMAP      (this);
         this.controller = new CONTROLLER(this, {
-            a:      "KeyZ"      ,
-            b:      "KeyX"      ,
+            a:      "KeyX"      ,
+            b:      "KeyZ"      ,
             select: "Space"     ,
             start:  "Enter"     ,
             up:     "ArrowUp"   ,

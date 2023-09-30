@@ -79,29 +79,33 @@ class CONTROLLER{
         })
     };
 
-    update(){
+    read_gamepad(){
         // Since the controller API has a simple interface where we can simply
         // poll the state of the controller, we don't have to do event-based
         // keydown/keyup detection, just use the state of the controller here
-        if (this.gp_connected){
-            let gamepad = navigator.getGamepads()[this.gp_index];
-            // Use keybinds to set state of buffer_state
-            this.gp_state[0] = !!(gamepad.buttons[this.gp_binds.a     ] || {}).pressed;
-            this.gp_state[1] = !!(gamepad.buttons[this.gp_binds.b     ] || {}).pressed;
-            this.gp_state[2] = !!(gamepad.buttons[this.gp_binds.select] || {}).pressed;
-            this.gp_state[3] = !!(gamepad.buttons[this.gp_binds.start ] || {}).pressed;
-            this.gp_state[4] = !!(gamepad.buttons[this.gp_binds.up    ] || {}).pressed;
-            this.gp_state[5] = !!(gamepad.buttons[this.gp_binds.down  ] || {}).pressed;
-            this.gp_state[6] = !!(gamepad.buttons[this.gp_binds.left  ] || {}).pressed;
-            this.gp_state[7] = !!(gamepad.buttons[this.gp_binds.right ] || {}).pressed;
-            // Also use state of axes to update the buffer_state
-            if (gamepad.axes.length >= 2){
-                if      (gamepad.axes[0] >=  0.75) this.gp_state[7] = 0x01;
-                else if (gamepad.axes[0] <= -0.75) this.gp_state[6] = 0x01;
-                if      (gamepad.axes[1] >=  0.75) this.gp_state[5] = 0x01;
-                else if (gamepad.axes[1] <= -0.75) this.gp_state[4] = 0x01;
-            }
+        if (!this.gp_connected) return;
+        let gamepad = navigator.getGamepads()[this.gp_index];
+        if (!gamepad) return;
+        // Use keybinds to set state of buffer_state
+        this.gp_state[0] = !!(gamepad.buttons[this.gp_binds.a     ] || {}).pressed;
+        this.gp_state[1] = !!(gamepad.buttons[this.gp_binds.b     ] || {}).pressed;
+        this.gp_state[2] = !!(gamepad.buttons[this.gp_binds.select] || {}).pressed;
+        this.gp_state[3] = !!(gamepad.buttons[this.gp_binds.start ] || {}).pressed;
+        this.gp_state[4] = !!(gamepad.buttons[this.gp_binds.up    ] || {}).pressed;
+        this.gp_state[5] = !!(gamepad.buttons[this.gp_binds.down  ] || {}).pressed;
+        this.gp_state[6] = !!(gamepad.buttons[this.gp_binds.left  ] || {}).pressed;
+        this.gp_state[7] = !!(gamepad.buttons[this.gp_binds.right ] || {}).pressed;
+        // Also use state of axes to update the buffer_state
+        if (gamepad.axes.length >= 2){
+            if      (gamepad.axes[0] >=  0.75) this.gp_state[7] = 0x01;
+            else if (gamepad.axes[0] <= -0.75) this.gp_state[6] = 0x01;
+            if      (gamepad.axes[1] >=  0.75) this.gp_state[5] = 0x01;
+            else if (gamepad.axes[1] <= -0.75) this.gp_state[4] = 0x01;
         }
+    }
+    
+    update(){
+        this.read_gamepad();
         for (let i = 0; i < this.state.length; i++){
             this.state[i] = this.kb_state[i] | this.gp_state[i];
         }

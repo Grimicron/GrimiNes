@@ -16,5 +16,23 @@ function debug_log(obj){
 
 function hx_fmt(num, double=false, prefix=false){
     return  (prefix ? "0x" : "")
-         + ((num == null) ? "NN" : num.toString(16).padStart(double ? 4 : 2, "0").toUpperCase());
+          + ((num == null) ? "NN" : num.toString(16).padStart(double ? 4 : 2, "0").toUpperCase());
+}
+
+function bn_fmt(num, nibbles=4, prefix=false){
+    return  (prefix ? "0b" : "")
+          + ((num == null) ? "NN" : num.toString(2).padStart(nibbles * 4, "0"));
+}
+
+function download(filename, text) {
+    let el = document.createElement('a');
+    el.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+    el.setAttribute('download', filename);
+
+    el.style.display = 'none';
+    document.body.appendChild(el);
+
+    el.click();
+
+    document.body.removeChild(el);
 }

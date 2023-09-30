@@ -8,6 +8,7 @@ class NROM{ // iNES Mapper #000
         this.ppu_pal_ram    = new Uint8Array(0x20);
         this.mem_mirror_map = new Uint16Array(0x10000);
         this.ppu_mirror_map = new Uint16Array(0x04000);
+        this.debug_out      = new Uint8Array(0x1000);
     }
 
     load_prg_rom(rom){
@@ -105,6 +106,7 @@ class NROM{ // iNES Mapper #000
 
     write (addr, val){
         if ((addr >= 0x0000) && (addr <= 0x07FF)) this.cpu_ram[addr] = val;
+        if ((addr >= 0x6000) && (addr <= 0x7FFF)) this.debug_out[addr - 0x6000] = val;
     }
 
     ppu_read(addr){
@@ -117,6 +119,38 @@ class NROM{ // iNES Mapper #000
     ppu_write(addr, val){
         if ((addr >= 0x2000) && (addr <= 0x2FFF)) this.ppu_vram[addr - 0x2000] = val;
         if ((addr >= 0x3000) && (addr <= 0x3F1F)) this.ppu_pal_ram[addr - 0x3F00] = val;
+    }
+}
+
+class UXROM extends NROM{ // iNes Mapper #002
+    constructor(mmap){
+        super(mmap);
+        this.prg_rom_bank = 0x00;
+    }
+
+    load_prg_rom(rom){
+        this.prg_rom = new Uint8Array(this.mmap.rom_flags[4] * 0x4000);
+        for (let i = 0x0000; i < this.prg_rom.length; i++){
+            this.prg_rom[i] = rom[0x0010 + i];
+        }
+    }
+
+    read(addr){
+        if ((addr >= 0x0000) && (addr <= 0x07FF)) return this.cpu_ram[addr];
+        if ((addr >= 0x8000) && (addr <= 0xBFFF)) return this.prg_rom[(this.prg_rom_bank << 14)      + (addr - 0x8000)];
+        if ((addr >= 0xC000) && (addr <= 0xFFFF)) return this.prg_rom[(this.prg_rom.length - 0x4000) + (addr - 0xC000)];
+        return 0x00;
+    }
+
+    write(addr, val){
+        if ((addr >= 0x8000) && (addr <= 0xFFFF)) this.prg_rom_bank = Math.min(val & 0x0F, this.mmap.rom_flags[4] - 1);
+        super.write(addr, val);
+    }
+
+    ppu_write(addr, val){
+        // UxROM uses CHR RAM instead of CHR ROM
+        if ((addr >= 0x0000) && (addr <= 0x1FFF)) this.chr_rom[addr] = val;
+        super.ppu_write(addr, val);
     }
 }
 
@@ -146,6 +180,7 @@ class CNROM extends NROM{ // iNES Mapper #003
 
 function mapper_factory(mmap, mapper_id){
     if (mapper_id == 0) return new NROM(mmap);
+    if (mapper_id == 2) return new UXROM(mmap);
     if (mapper_id == 3) return new CNROM(mmap);
     return null;
 }

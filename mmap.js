@@ -9,9 +9,6 @@ class MMAP{
 
     constructor(p_nes){
         this.nes = p_nes;
-        // Pretty complicated stuff, explained better in the
-        // two buffer functions below
-        this.ppu_read_buffer   = 0x00;
         // More info about this on the wiki:
         // https://www.nesdev.org/wiki/Open_bus_behavior#PPU_open_bus
         this.ppu_open_bus      = 0x00;
@@ -149,20 +146,6 @@ class MMAP{
         return this.mapper.ppu_read(this.mapper.ppu_mirror_map[addr]);
     }
 
-    ppu_get_buffer(addr){
-        // This function is the only way the CPU can read from the
-        // PPU's VRAM, and is the only place where we use this function,
-        // everywhere else, we use the normal PPU read
-        // The difference between the normal read and this read is that
-        // the PPU read buffer is updated in a weird way, see below
-        // https://www.nesdev.org/wiki/PPU_registers#PPUDATA
-        let pal_read = addr >= 0x3F00;
-        let tmp = pal_read ? this.mapper.ppu_read(this.mapper.ppu_mirror_map[addr]) : this.ppu_read_buffer;
-        let mapped_addr = pal_read ? (addr - 0x1000) : addr;
-        this.ppu_read_buffer = this.mapper.ppu_read(this.mapper.ppu_mirror_map[mapped_addr]);
-        return tmp;
-    }
-    
     ppu_set_byte(addr, val){
         this.mapper.ppu_write(this.mapper.ppu_mirror_map[addr], val);
     }

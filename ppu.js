@@ -33,6 +33,8 @@ class PPU{
         // of PPU_SCROLL and PPU_ADDR. It is shared by those two registers.
         // Cleared upon reading PPU_STATUS
         this.latch_w      = 0;
+        // Read buffer for 0x2007 reads
+        this.read_buffer   = 0x00;
         // Used to keep track of which scanline we are rendering
         this.scan_index   = 0;
         // Yet another address space (it is unspecified
@@ -61,7 +63,7 @@ class PPU{
 
     set_ctrl(val){
         this.reg_ctrl = val;
-        this.reg_t = (this.reg_t & 0b11110011_11111111) | ((val & 0x03) << 10);
+        this.reg_t = (this.reg_t & 0x73FF) | ((val & 0x03) << 10);
         if ((this.reg_status & (1 << PPU.VBLANK_POS)) && (this.reg_ctrl & 0x80)){
             // It says on the wiki this happens but I'm not sure
             // if this will totally work because my emulator is not
@@ -79,7 +81,7 @@ class PPU{
         // bus contents, but since no program should use that, we should
         // be able to just return zeroes
         let tmp = this.reg_status;
-        // Reading PPU_STATUS clear VBLANK flag after the read (I think)
+        // Reading PPU_STATUS clears VBLANK flag after the read (I think)
         this.set_status(PPU.VBLANK_POS, 0);
         // Reading PPU_STATUS resets the latch
         this.latch_w = 0;
@@ -106,15 +108,15 @@ class PPU{
 
     set_scroll(val){
         if (this.latch_w){
-            this.reg_t = (this.reg_t & 0b10001100_00011111)
-                           | ((val & 0b11111000) <<  2)
-                           | ((val & 0b00000111) << 12);
+            this.reg_t = (this.reg_t & 0x0C1F)
+                           | ((val & 0xF8) <<  2)
+                           | ((val & 0x07) << 12);
             // After second write, the latch resets
             // to first write behaviour
             this.latch_w = 0;
         }
         else{
-            this.reg_t = (this.reg_t & 0b11111111_11100000) | ((val & 0b11111000) >>> 3);
+            this.reg_t = (this.reg_t & 0x7FE0) | ((val & 0xF8) >>> 3);
             this.fine_x = val & 0x07;
             this.latch_w = 1;
         }
@@ -122,40 +124,49 @@ class PPU{
 
     set_addr(val){
         if (this.latch_w){
-            this.reg_t = (this.reg_t & 0b11111111_00000000) | val;
+            this.reg_t = (this.reg_t & 0x7F00) | val;
             this.reg_v =  this.reg_t;
             // Same as before with the latch
             this.latch_w = 0;
         }
         else{
             // Most significant bit is cleared
-            this.reg_t = (this.reg_t & 0b10000000_11111111) | ((val & 0b00111111) << 8);
+            this.reg_t = (this.reg_t & 0x00FF) | ((val & 0x3F) << 8);
             this.latch_w = 1;
         }
     }
 
     get_data(){
-        let tmp = this.nes.mmap.ppu_get_buffer(this.reg_v & 0b00111111_11111111);
-        this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0b01111111_11111111;
+        // Only first 14 bits needed for internal PPU VRAM addressing
+        let addr = this.reg_v & 0x3FFF;
+        // PPU 0x2007 reads behaviour:
+        // - Return contents of read buffer
+        // - Set read buffer to contents of VRAM at V
+        // - Increment V by 1 or 32 depending on flag at REG_CTRL
+        // If reading V would result in a palette read:
+        // - Return contents of read
+        // - Update read buffer to contents of V - 0x1000
+        // - Increment V by 1 or 32 depending on flag at REG_CTRL
+        let pal_read = addr >= 0x3F00;
+        let tmp = pal_read ? this.nes.mmap.ppu_get_byte(addr) : this.ppu_read_buffer;
+        this.read_buffer = this.nes.mmap.ppu_get_byte(pal_read ? (addr - 0x1000) : addr);
+        // Pretty sure the 15th bit can be affected by the VRAM access increase
+        this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0x7FFF;
         return tmp;
     }
-
+    
     set_data(val){
-        debug_log("PPU_DATA write: " +  hx_fmt(val));
-        this.nes.mmap.ppu_set_byte(this.reg_v & 0b00111111_11111111, val);
-        this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0b00111111_11111111;
+        // See above for similar notes
+        this.nes.mmap.ppu_set_byte(this.reg_v & 0x3FFF, val);
+        this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0x7FFF;
     }
 
     oam_dma(val){
         // This paralyzes the CPU for 513 cycles (there is a small subtlety
-        // of 1 cycle but for the purposes of this emulator it doesn't really
-        // matter for the purpose of this emulator)
+        // of 1 cycle but for the purposes of this emulator it doesn't really matter)
         val <<= 8;
-        // DMA cannot read anything other than RAM
-        if (val < 0xC000){
-            for (let i = 0; i < 0x0100; i++){
-                this.oam[(this.oam_addr + i) & 0xFF] = this.nes.mmap.get_byte(val | i);
-            }
+        for (let i = 0; i < 0x0100; i++){
+            this.oam[(this.oam_addr + i) & 0xFF] = this.nes.mmap.get_byte(val | i);
         }
         // I know it's kinda weird that the PPU and CPU sort of directly interact
         // here, without MMAP as an intermediary, but it is what it is, it's the
@@ -208,8 +219,8 @@ class PPU{
     // Check there to see why this works
     coarse_x_inc(){
         if ((this.reg_v & 0x001F) == 0x1F){
-            this.reg_v &= ~0x001F;
-            this.reg_v ^=  0x0400;
+            this.reg_v &= 0xFFE0;
+            this.reg_v ^= 0x0400;
         }
         else this.reg_v++;
     }
@@ -217,7 +228,7 @@ class PPU{
     y_inc(){
         if ((this.reg_v & 0x7000) < 0x7000) this.reg_v += 0x1000;
         else{
-            this.reg_v &= ~0x7000;
+            this.reg_v &= 0x0FFF;
             let y = (this.reg_v & 0x03E0) >> 5;
             if (y == 29){
                 y = 0;
@@ -225,7 +236,7 @@ class PPU{
             }
             else if (y == 31) y = 0;
             else y++;
-            this.reg_v = (this.reg_v & (~0x03E0) | (y << 5));
+            this.reg_v = (this.reg_v & 0x7C1F) | (y << 5);
         }
     }
 
@@ -339,11 +350,12 @@ class PPU{
         // C = Palette color
         let buffer  = new Uint8Array(256);
         let pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
-        let fine_y  =  (this.reg_v & 0b01110000_00000000) >>> 12;
+        let fine_y  =  (this.reg_v & 0x7000) >>> 12;
         let bg_low  =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
         let bg_high =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
         for (let i = 0; i < 256; i++){
-            let color     = ((!!(bg_high & (1 << (7 - this.fine_x)))) << 1) | (!!(bg_low & (1 << (7 - this.fine_x))));
+            let cur_bit   = 1 << (7 - this.fine_x);
+            let color     = ((!!(bg_high & cur_bit)) << 1) | (!!(bg_low & cur_bit));
             // It's pretty complicated how these AT mapping bitwise magic fomulas
             // actually work, but if you think about it, it will make sense
             // See NesDev wiki for more info
@@ -359,17 +371,17 @@ class PPU{
             let at_group  = this.nes.mmap.ppu_get_byte(at_addr);
             let pal       = null;
             // It's easier just to hardcode this part
-            if      (at_sector == 0b00){
-                pal = (at_group & 0b00000011) >>> 0;
+            if      (at_sector == 0x00){
+                pal = (at_group & 0x03) >>> 0;
             }
-            else if (at_sector == 0b01){
-                pal = (at_group & 0b00001100) >>> 2;
+            else if (at_sector == 0x01){
+                pal = (at_group & 0x0C) >>> 2;
             }
-            else if (at_sector == 0b10){
-                pal = (at_group & 0b00110000) >>> 4;
+            else if (at_sector == 0x02){
+                pal = (at_group & 0x30) >>> 4;
             }
-            else if (at_sector == 0b11){
-                pal = (at_group & 0b11000000) >>> 6;
+            else if (at_sector == 0x03){
+                pal = (at_group & 0xC0) >>> 6;
             }
             // Explained above, in sprite_scanline()
             if (!color) pal = 0x00;
@@ -382,7 +394,7 @@ class PPU{
                 // Re-fetch NT/PT data (we only do it here because they
                 // don't change until there is a change in coarse X)
                 pt_addr = ((this.reg_ctrl & 0x10) << 8) | (this.nes.mmap.ppu_get_byte(0x2000 | (this.reg_v & 0x0FFF)) << 4);
-                fine_y  =  (this.reg_v & 0b01110000_00000000) >>> 12;
+                fine_y  =  (this.reg_v & 0x7000) >>> 12;
                 bg_low  =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y    );
                 bg_high =   this.nes.mmap.ppu_get_byte(pt_addr + fine_y + 8);
             }
@@ -402,9 +414,11 @@ class PPU{
         // YYYYYyyy
         // Y = coarse Y
         // y = fine Y
-        // and then subtracting them
-        let t_y = ((this.reg_t & 0b0000011_11100000) >>> 2) | ((this.reg_t & 0b1110000_00000000) >>> 12);
-        let v_y = ((this.reg_v & 0b0000011_11100000) >>> 2) | ((this.reg_v & 0b1110000_00000000) >>> 12);
+        // and then subtracting them while also keeping in
+        // mind the vertical NT position
+        let t_y = ((this.reg_t & 0x03E0) >>>  2) | ((this.reg_t & 0x7000) >>> 12);
+        let v_y = ((this.reg_v & 0x03E0) >>>  2) | ((this.reg_v & 0x7000) >>> 12);
+        v_y += ((this.reg_v & 0x0800) ^ (this.reg_t & 0x0800)) ? 240 : 0;
         return v_y - t_y;
     }
 
@@ -444,8 +458,12 @@ class PPU{
                 else                                         mux_buf[i] = this.prev_spr_buf.buf[i];
             }
             // Calculate if we should set sprite-hit-0 flag
-            for (let i = 0; i < 256; i++){
-                if (spr_buf.sprz[i] && bg_buf[i]){
+            // We don't check for sprite-hit-0 at pixel 255 because
+            // it's actually a bug in the PPU that the sprite-hit-0
+            // flag cannot be set at pixel 255 for an obscure reason having
+            // to do with the pixel pipeline
+            for (let i = 0; i < 255; i++){
+                if (spr_buf.sprz[i] && (bg_buf[i] & 0x80)){
                     this.set_status(PPU.SPRITEHIT_POS, 1);
                     break;
                 }
@@ -499,7 +517,7 @@ class PPU{
         // has been rendered
         this.y_inc();
         // Set horizontal component of V to horizontal component of T
-        this.reg_v = (this.reg_v & (~0b10000100_00011111)) | (this.reg_t & 0b10000100_00011111);
+        this.reg_v = (this.reg_v & 0x7BE0) | (this.reg_t & 0x041F);
         // Fine X should have stayed the same after rendering the scanline
         // since we do 256 increments of it and always reset it once it
         // reaches 8

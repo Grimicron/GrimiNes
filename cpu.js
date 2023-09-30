@@ -753,7 +753,7 @@ class CPU{
             // Pretty sure that we push with the B Flag set
             // https://www.nesdev.org/the%20'B'%20flag%20&%20BRK%20instruction.txt
             // Remember bit 5 is always high
-            this.push(this.proc_status | (1<<CPU.B_FLAG) | 0b00100000);
+            this.push(this.proc_status | (1<<CPU.B_FLAG) | 0x20);
             // Wiki says that interrupts automatically set the I flag to 1
             // https://www.nesdev.org/wiki/Status_flags
             this.set_flag(CPU.I_FLAG, 1);
@@ -763,7 +763,7 @@ class CPU{
         if (opcode == 0x40){ // RTI
             this.nes.mmap.get_byte(this.prg_counter+1);
             // Remeber bit 5 is always high
-            this.proc_status = this.pop() | 0b00100000;
+            this.proc_status = this.pop() | 0x20;
             // For some godforsaken reason
             this.set_flag(CPU.B_FLAG, 0);
             // Make sure order of operations doesn't mess us up
@@ -785,13 +785,13 @@ class CPU{
         if (opcode == 0x08){ // PHP
             // For some godforsaken reason, PHP pushes the B_FLAG set
             // And also, bit 5 is always high
-            this.push(this.proc_status | (1<<CPU.B_FLAG) | 0b00100000);
+            this.push(this.proc_status | (1<<CPU.B_FLAG) | 0x20);
             this.prg_counter++;
             return 3;
         }
         if (opcode == 0x28){ // PLP
             // Remember bit 5 is always high
-            this.proc_status = this.pop() | 0b00100000;
+            this.proc_status = this.pop() | 0x20;
             // For some godforsaken reason
             this.set_flag(CPU.B_FLAG, 0);
             this.prg_counter++;
