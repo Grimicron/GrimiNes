@@ -161,7 +161,7 @@ class CPU{
         low += this.x_reg;
         let page_cross = low > 0xFF;
         low &= 0xFF;
-        this.nes.mmap.get_byte((high << 8) | low);
+        if (page_cross) this.nes.mmap.get_byte((high << 8) | low);
         high = (high + page_cross) & 0xFF;
         return {bytes_used: 2, addr: (high << 8) | low, page_crossed: page_cross};
     }
@@ -174,7 +174,7 @@ class CPU{
         low += this.y_reg;
         let page_cross = low > 0xFF;
         low &= 0xFF;
-        this.nes.mmap.get_byte((high << 8) | low);
+        if (page_cross) this.nes.mmap.get_byte((high << 8) | low);
         high = (high + page_cross) & 0xFF;
         return {bytes_used: 2, addr: (high << 8) | low, page_crossed: page_cross};
     }
@@ -216,7 +216,7 @@ class CPU{
         low += this.y_reg;
         let page_cross = low > 0xFF;
         low &= 0xFF;
-        this.nes.mmap.get_byte((high << 8) | low);
+        if (page_cross) this.nes.mmap.get_byte((high << 8) | low);
         high = (high + page_cross) & 0xFF;
         return {bytes_used: 1, addr: (high << 8) | low, page_crossed: page_cross};
     }
@@ -997,6 +997,8 @@ class CPU{
             if (flag == null) return null;
             let data = this.relative();
             if (this.get_flag(flag) == flag_val){
+                this.nes.mmap.get_byte(this.prg_counter + data.bytes_used + 1);
+                if (data.page_crossed) this.nes.mmap.get_byte((data.addr - 0x0100) & 0xFFFF);
                 this.prg_counter = data.addr;
                 // All branch instruction take the same cycles
                 // Takes 1 extra cycle if branch is taken
