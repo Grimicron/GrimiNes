@@ -7,6 +7,7 @@ class NES{
         this.cpu        = new CPU       (this);
         this.ppu        = new PPU       (this);
         this.mmap       = new MMAP      (this);
+        this.logger     = new LOGGER    (this);
         this.controller = new CONTROLLER(this, {
             a:      "KeyX"      ,
             b:      "KeyZ"      ,
@@ -26,6 +27,7 @@ class NES{
             left:   14,
             right:  15,
         });
+        this.keep_logs = false;
         this.prev_ts = 0;
         this.fps_update_ts = 0;
         // Counts how many full images have been rendered by the
@@ -74,7 +76,10 @@ class NES{
             // CPU cycles along with the PPU dots and make them execute once every 3 dots
             // since a CPU cycle is basically 3 PPU dots
             if ((!(i % 3)) && this.cpu_wait_cycles) this.cpu_wait_cycles--;
-            else                                    this.cpu_wait_cycles += this.cpu.exec_op();
+            else{
+                if (this.keep_logs) this.logger.cpu_log();
+                this.cpu_wait_cycles += this.cpu.exec_op();
+            }
             if (this.ppu_wait_dots) this.ppu_wait_dots--;
             else                    this.ppu_wait_dots += this.ppu.exec_dot_group();
         }

@@ -47,6 +47,7 @@ class MMAP{
             }
             case 0x2002:{
                 let tmp = this.nes.ppu.get_status();
+                tmp = (tmp & 0xE0) | (this.ppu_open_bus & 0x1F);
                 this.ppu_open_bus = tmp;
                 return tmp;
             }

@@ -3,7 +3,7 @@ let rom_button = null;
 let canvas     = null;
 let ctx        = null;
 let fr         = null;
-let test_nes   = null;
+let my_nes     = null;
 
 function dump_pattern_table(offset){
     let palette = [
@@ -16,8 +16,8 @@ function dump_pattern_table(offset){
         let low_bytes = [];
         let high_bytes = [];
         for (let j = 0; j < 8; j++){
-            low_bytes[j]  = test_nes.mmap.mapper.prg_rom[(i*16) + j + 0 + offset];
-            high_bytes[j] = test_nes.mmap.mapper.prg_rom[(i*16) + j + 8 + offset];
+            low_bytes[j]  = my_nes.mmap.mapper.prg_rom[(i*16) + j + 0 + offset];
+            high_bytes[j] = my_nes.mmap.mapper.prg_rom[(i*16) + j + 8 + offset];
         }
         for (let j = 0; j < 64; j++){
             let px_x  = (j & 0x07) >>> 0;
@@ -39,8 +39,29 @@ function dump_pattern_tables(offset){
 }
 
 function frame(){
-    test_nes.emu_cycle_queue();
+    my_nes.emu_cycle_queue();
     window.requestAnimationFrame(frame);
+}
+
+function init_nes(rom){
+    canvas.style.display = "block";
+    rom_button.style.display = "none";
+    my_nes.init(ctx, rom);
+    window.requestAnimationFrame(frame);
+}
+
+function try_uri_load(){
+    let rom_name = window.location.search.split("?")[1];
+    if (!rom_name) return;
+    let req = new XMLHttpRequest();
+    req.open("GET", "roms/" + rom_name, true);
+    req.responseType = "arraybuffer";
+    req.overrideMimeType("text/plain");
+    req.onload = () => {
+        if (req.status != 200) return;
+        init_nes(new Uint8Array(req.response));
+    };
+    req.send();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -49,19 +70,18 @@ document.addEventListener("DOMContentLoaded", () => {
     canvas     = document.getElementById("screen");
     ctx        = canvas.getContext("2d");
     fr         = new FileReader();
-    test_nes   = new NES();
+    my_nes     = new NES();
+    
+    ctx.imageSmoothingEnabled = false;
+    ctx.mozImageSmoothingEnabled = false;
+
+    try_uri_load();
     
     rom_input.onchange = () => {
 	   fr.readAsArrayBuffer(rom_input.files[0]);
     };
-    fr.onloadend  = (e) => {
-        canvas.style.display = "block";
-        rom_button.style.display = "none";
-        ctx.imageSmoothingEnabled = false;
-        ctx.mozImageSmoothingEnabled = false;
-        test_nes.init(ctx, new Uint8Array(fr.result));
-        show_logs = false;
-        window.requestAnimationFrame(frame);
+    fr.onloadend = (e) => {
+        init_nes(new Uint8Array(fr.result));
     };
     rom_button.onclick = () => {
         rom_input.click();

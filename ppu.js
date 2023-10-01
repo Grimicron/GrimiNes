@@ -77,9 +77,6 @@ class PPU{
     }
 
     get_status(){
-        // Normally the first 5 bits of PPU_STATUS would return stale
-        // bus contents, but since no program should use that, we should
-        // be able to just return zeroes
         let tmp = this.reg_status;
         // Reading PPU_STATUS clears VBLANK flag after the read (I think)
         this.set_status(PPU.VBLANK_POS, 0);
@@ -148,7 +145,7 @@ class PPU{
         // - Update read buffer to contents of V - 0x1000
         // - Increment V by 1 or 32 depending on flag at REG_CTRL
         let pal_read = addr >= 0x3F00;
-        let tmp = pal_read ? this.nes.mmap.ppu_get_byte(addr) : this.ppu_read_buffer;
+        let tmp = pal_read ? this.nes.mmap.ppu_get_byte(addr) : this.read_buffer;
         this.read_buffer = this.nes.mmap.ppu_get_byte(pal_read ? (addr - 0x1000) : addr);
         // Pretty sure the 15th bit can be affected by the VRAM access increase
         this.reg_v = (this.reg_v + ((this.reg_ctrl & 0x04) ? 32 : 1)) & 0x7FFF;
@@ -296,7 +293,7 @@ class PPU{
             // https://www.nesdev.org/wiki/PPU_OAM#Byte_1
             let spr_pt = (spr_size == 8)
                        ? (((this.reg_ctrl     & 0x08) <<  9) |  (this.sec_oam[i+1]         << 4) | spr_offset)
-                       : (((this.sec_oam[i+1] & 0x01) << 12) | ((this.sec_oam[i+1] & 0xFE) << 5) | spr_offset);
+                       : (((this.sec_oam[i+1] & 0x01) << 12) | ((this.sec_oam[i+1] & 0xFE) << 4) | spr_offset);
             // Low byte of sprite color
             let spr_low    =  this.nes.mmap.ppu_get_byte(spr_pt    );
             // High byte of sprite color
@@ -331,8 +328,6 @@ class PPU{
         // sprites should hide immediatly or be 1 scanline delayed, but that
         // situation doesn't really affect functionality and should NEVER happen anyways
         if (!(this.reg_mask & 0x04)){
-            // Not really sure what color to pick for this, so I'll
-            // just go with a random black
             for (let i = 0; i < 8; i++){
                 buffer[i] = 0x0F;
                 sprz_pixels[i] = 0x00;
@@ -513,14 +508,16 @@ class PPU{
             }
             this.put_pixel(i, scan_index, raw_c);
         }
-        // These 2 lines are verbose what happens after the scanline
-        // has been rendered
-        this.y_inc();
-        // Set horizontal component of V to horizontal component of T
-        this.reg_v = (this.reg_v & 0x7BE0) | (this.reg_t & 0x041F);
-        // Fine X should have stayed the same after rendering the scanline
-        // since we do 256 increments of it and always reset it once it
-        // reaches 8
+        if (this.reg_mask & 0x18){    
+            // These 2 lines are verbose what happens after the scanline
+            // has been rendered
+            this.y_inc();
+            // Set horizontal component of V to horizontal component of T
+            this.reg_v = (this.reg_v & 0x7BE0) | (this.reg_t & 0x041F);
+            // Fine X should have stayed the same after rendering the scanline
+            // since we do 256 increments of it and always reset it once it
+            // reaches 8
+        }
     }
 
     exec_dot_group(){
@@ -548,7 +545,7 @@ class PPU{
             this.set_status(PPU.SPRITEHIT_POS, 0);
             this.set_status(PPU.OVERFLOW_POS , 0);
             // Reset v back to t
-            this.reg_v = this.reg_t;
+            if (this.reg_mask & 0x18) this.reg_v = this.reg_t;
             // Reset dot group
             this.dot_group = 0;
             // Return here to not increase dot group in the later line

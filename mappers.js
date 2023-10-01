@@ -112,13 +112,14 @@ class NROM{ // iNES Mapper #000
     ppu_read(addr){
         if ((addr >= 0x0000) && (addr <= 0x1FFF)) return this.chr_rom[addr];
         if ((addr >= 0x2000) && (addr <= 0x2FFF)) return this.ppu_vram[addr - 0x2000];
-        if ((addr >= 0x3000) && (addr <= 0x3F1F)) return this.ppu_pal_ram[addr - 0x3F00];
+        if ((addr >= 0x3F00) && (addr <= 0x3F1F)) return this.ppu_pal_ram[addr - 0x3F00];
         return 0x00;
     }
 
     ppu_write(addr, val){
+        //if ((addr >= 0x0000) && (addr <= 0x1FFF)) this.chr_rom[addr] = val;
         if ((addr >= 0x2000) && (addr <= 0x2FFF)) this.ppu_vram[addr - 0x2000] = val;
-        if ((addr >= 0x3000) && (addr <= 0x3F1F)) this.ppu_pal_ram[addr - 0x3F00] = val;
+        if ((addr >= 0x3F00) && (addr <= 0x3F1F)) this.ppu_pal_ram[addr - 0x3F00] = val;
     }
 }
 

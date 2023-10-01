@@ -1,4 +1,4 @@
-let show_logs = true;
+let show_logs = false;
 
 // Returns the 8-bit signed two's complement of the given number
 function twos_comp(n){
@@ -24,15 +24,13 @@ function bn_fmt(num, nibbles=4, prefix=false){
           + ((num == null) ? "NN" : num.toString(2).padStart(nibbles * 4, "0"));
 }
 
-function download(filename, text) {
-    let el = document.createElement('a');
-    el.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-    el.setAttribute('download', filename);
-
-    el.style.display = 'none';
-    document.body.appendChild(el);
-
-    el.click();
-
-    document.body.removeChild(el);
+function download(filename, data){
+    let element = document.createElement("a");
+    let file = new Blob(data, { type: "text/plain" });
+    element.href = URL.createObjectURL(file);
+    element.download = filename;
+    element.style.display = "none";
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
 }

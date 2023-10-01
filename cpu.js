@@ -7,6 +7,7 @@
 // https://www.masswerk.at/nowgobang/2021/6502-illegal-opcodes
 // https://www.nesdev.org/wiki/Programming_with_unofficial_opcodes
 // https://www.nesdev.org/wiki/CPU_unofficial_opcodes
+// https://www.nesdev.org/6502_cpu.txt
 
 // IMPORTANT NOTE TO SELF:
 // Even though the MOS6502/Ricoh2A03 are little-endian, the opcode identifier
@@ -101,6 +102,12 @@ class CPU{
     // Throughout all these addressing mode fetching instructions,
     // we only return the page_crossed property if the addressing
     // mode can add an extra cycle because of a page being crossed
+
+    // If throughout the code you see a random/unnecessary fetch/write,
+    // it's probably just a dummy write put there for more accurate emulation
+    // Read the instruction timing section of the doc below for more info:
+    // https://www.nesdev.org/6502_cpu.txt
+    
     accumulator(){
         // Returning an address doesn't make any sense since the
         // accumulator is a register, so the instructions which use
@@ -130,7 +137,9 @@ class CPU{
         // Second byte of instruction gets the contents of X added to it
         // (carry is ignored) and the resulting pointer points to the data
         // in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.x_reg) & 0xFF;
+        let zp_ptr = this.nes.mmap.get_byte(this.prg_counter+1);
+        this.nes.mmap.get_byte(zp_ptr);
+        zp_ptr = (zp_ptr + this.x_reg) & 0xFF;
         return {bytes_used: 1, addr: zp_ptr};
     }
 
@@ -138,28 +147,36 @@ class CPU{
         // Second byte of instruction gets the contents of Y added to it
         // (carry is ignored) and the resulting pointer points to the data
         // in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.y_reg) & 0xFF;
+        let zp_ptr = this.nes.mmap.get_byte(this.prg_counter+1);
+        this.nes.mmap.get_byte(zp_ptr);
+        zp_ptr = (zp_ptr + this.y_reg) & 0xFF;
         return {bytes_used: 1, addr: zp_ptr};
     }
 
     indexed_abs_x(){ // addr16, X
         // Second and third byte of instruction get contents of X added to
-        // them and the resulting pointer points to the data (I'm ingoring
-        // carry but I don't know if that's how it's done)
-        let ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
-        let indexed_ptr = (ptr + this.x_reg) & 0xFFFF;
-        let page_cross = (ptr>>>8) != (indexed_ptr>>>8);
-        return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
+        // them and the resulting pointer points to the data
+        let low  = this.nes.mmap.get_byte(this.prg_counter+1);
+        let high = this.nes.mmap.get_byte(this.prg_counter+2);
+        low += this.x_reg;
+        let page_cross = low > 0xFF;
+        low &= 0xFF;
+        this.nes.mmap.get_byte((high << 8) | low);
+        high = (high + page_cross) & 0xFF;
+        return {bytes_used: 2, addr: (high << 8) | low, page_crossed: page_cross};
     }
 
     indexed_abs_y(){ // addr16, Y
         // Second and third byte of instruction get contents of Y added to
-        // them and the resulting pointer points to the data (I'm ingoring
-        // carry but I don't know if that's how it's done)
-        let ptr = (this.nes.mmap.get_byte(this.prg_counter+2) << 8) | this.nes.mmap.get_byte(this.prg_counter+1);
-        let indexed_ptr = (ptr + this.y_reg) & 0xFFFF;
-        let page_cross = (ptr>>>8) != (indexed_ptr>>>8);
-        return {bytes_used: 2, addr: indexed_ptr, page_crossed: page_cross};
+        // them and the resulting pointer points to the data
+        let low  = this.nes.mmap.get_byte(this.prg_counter+1);
+        let high = this.nes.mmap.get_byte(this.prg_counter+2);
+        low += this.y_reg;
+        let page_cross = low > 0xFF;
+        low &= 0xFF;
+        this.nes.mmap.get_byte((high << 8) | low);
+        high = (high + page_cross) & 0xFF;
+        return {bytes_used: 2, addr: (high << 8) | low, page_crossed: page_cross};
     }
 
     relative(){
@@ -181,26 +198,27 @@ class CPU{
 
     indexed_indirect(){ // (addr8, X)
         // Pointer to 16bit pointer stored in the zero-page
-        let zp_ptr = (this.nes.mmap.get_byte(this.prg_counter+1) + this.x_reg) & 0xFF;
+        let zp_ptr = this.nes.mmap.get_byte(this.prg_counter+1);
+        this.nes.mmap.get_byte(zp_ptr);
+        zp_ptr = (zp_ptr + this.x_reg) & 0xFF;
         // 16bit pointer to data in memory
-        // I think zp_ptr + 1 should wrap around by ignoring carry but
-        // I'm not completely sure
         let true_ptr = (this.nes.mmap.get_byte((zp_ptr + 1) & 0xFF) << 8) | this.nes.mmap.get_byte(zp_ptr);
         return {bytes_used: 1, addr: true_ptr};
     }
 
     indirect_indexed(){ // (addr8), Y
-        // This addressing mode is so confusing, just read the docs:
-        // https://stackoverflow.com/questions/46262435/indirect-y-indexed-addressing-mode-in-mos-6502
+        // Argument points to 16bit pointer stored in the zero-page
+        // That pointer is loaded and gets the contents of the Y register
+        // added to it to get the effective address
         let zp_ptr = this.nes.mmap.get_byte(this.prg_counter+1);
-        // Pretty sure if zp_ptr is 0xFF, then it wraps around for the high byte and goes to 0x00
-        let true_ptr = (this.nes.mmap.get_byte((zp_ptr + 1) & 0xFF) << 8) | this.nes.mmap.get_byte(zp_ptr);
-        let indexed_ptr = (true_ptr + this.y_reg) & 0xFFFF;
-        let page_cross = (true_ptr>>>8) != (indexed_ptr>>>8);
-        // I'm really not sure if that's how the page-crossing works on this addressing
-        // mode but it's the only option that made sense to me since I couldn't find much
-        // information on this
-        return {bytes_used: 1, addr: indexed_ptr, page_crossed: page_cross};
+        let low  = this.nes.mmap.get_byte( zp_ptr);
+        let high = this.nes.mmap.get_byte((zp_ptr + 1) & 0xFF);
+        low += this.y_reg;
+        let page_cross = low > 0xFF;
+        low &= 0xFF;
+        this.nes.mmap.get_byte((high << 8) | low);
+        high = (high + page_cross) & 0xFF;
+        return {bytes_used: 1, addr: (high << 8) | low, page_crossed: page_cross};
     }
 
     absolute_indirect(){ // (addr16)
@@ -532,6 +550,7 @@ class CPU{
                 if (op_addr_mode == 0x0) return null;
                 // Handle accumulator addressing mode
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
                 this.set_flag(CPU.C_FLAG, val & 0x80);
                 val = (val << 1) & 0xFF;
                 this.set_flag(CPU.Z_FLAG, !val);
@@ -548,6 +567,7 @@ class CPU{
                 if (op_addr_mode == 0x0) return null;
                 // Same as before
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
                 let high_bit = val & 0x80;
                 val = ((val << 1) & 0xFF) | this.get_flag(CPU.C_FLAG);
                 this.set_flag(CPU.C_FLAG, high_bit);
@@ -564,6 +584,7 @@ class CPU{
                 if (op_addr_mode == 0x0) return null;
                 // Same as before
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
                 this.set_flag(CPU.C_FLAG, val & 0x01);
                 val = val >>> 1;
                 this.set_flag(CPU.Z_FLAG, !val);
@@ -580,6 +601,7 @@ class CPU{
                 if (op_addr_mode == 0x0) return null;
                 // Same as before
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
+                if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
                 let low_bit = val & 0x01;
                 val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
                 this.set_flag(CPU.C_FLAG, low_bit);
@@ -619,6 +641,7 @@ class CPU{
                 if ((op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x2)) return null;
                 let val = this.nes.mmap.get_byte(data.addr);
+                this.nes.mmap.set_byte(data.addr, val);
                 val = (val - 1) & 0xFF;
                 this.set_flag(CPU.N_FLAG, val & 0x80);
                 this.set_flag(CPU.Z_FLAG, !val);
@@ -632,6 +655,7 @@ class CPU{
                 if ((op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x2)) return null;
                 let val = this.nes.mmap.get_byte(data.addr);
+                this.nes.mmap.set_byte(data.addr, val);
                 val = (val + 1) & 0xFF;
                 this.set_flag(CPU.N_FLAG, val & 0x80);
                 this.set_flag(CPU.Z_FLAG, !val);
@@ -740,7 +764,8 @@ class CPU{
         debug_log(hx_fmt(this.prg_counter, true, true) + ": " + hx_fmt(opcode, false, true));
         // Check for all the single byte instructions since they don't really
         // fit any pattern
-        // These first 3 instruction all perform a dummy fetch to the next byte
+        // All instructions perform a dummy fetch to PC+1, regardless of if
+        // they use it or not
         if (opcode == 0x00){ // BRK
             this.nes.mmap.get_byte(this.prg_counter+1);
             // I think I_FLAG only blocks external IRQs
@@ -783,6 +808,7 @@ class CPU{
             return 6;
         }
         if (opcode == 0x08){ // PHP
+            this.nes.mmap.get_byte(this.prg_counter+1);
             // For some godforsaken reason, PHP pushes the B_FLAG set
             // And also, bit 5 is always high
             this.push(this.proc_status | (1<<CPU.B_FLAG) | 0x20);
@@ -790,6 +816,7 @@ class CPU{
             return 3;
         }
         if (opcode == 0x28){ // PLP
+            this.nes.mmap.get_byte(this.prg_counter+1);
             // Remember bit 5 is always high
             this.proc_status = this.pop() | 0x20;
             // For some godforsaken reason
@@ -798,11 +825,13 @@ class CPU{
             return 4;
         }
         if (opcode == 0x48){ // PHA
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.push(this.acc);
             this.prg_counter++;
             return 3;
         }
         if (opcode == 0x68){ // PLA
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.acc = this.pop();
             this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -810,6 +839,7 @@ class CPU{
             return 4;
         }
         if (opcode == 0x88){ // DEY
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.y_reg = (this.y_reg - 1) & 0xFF;
             this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.y_reg);
@@ -817,6 +847,7 @@ class CPU{
             return 2;
         }
         if (opcode == 0xA8){ // TAY
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.y_reg = this.acc;
             this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.y_reg);
@@ -824,6 +855,7 @@ class CPU{
             return 2;
         }
         if (opcode == 0xC8){ // INY
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.y_reg = (this.y_reg + 1) & 0xFF;
             this.set_flag(CPU.N_FLAG,  this.y_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.y_reg);
@@ -831,6 +863,7 @@ class CPU{
             return 2;
         }
         if (opcode == 0xE8){ // INX
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.x_reg = (this.x_reg + 1) & 0xFF;
             this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.x_reg);
@@ -838,26 +871,31 @@ class CPU{
             return 2;
         }
         if (opcode == 0x18){ // CLC
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.C_FLAG, 0);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0x38){ // SEC
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.C_FLAG, 1);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0x58){ // CLI
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.I_FLAG, 0);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0x78){ // SEI
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.I_FLAG, 1);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0x98){ // TYA
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.acc = this.y_reg;
             this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -865,21 +903,25 @@ class CPU{
             return 2;
         }
         if (opcode == 0xB8){ // CLV
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.V_FLAG, 0);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0xD8){ // CLD
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.D_FLAG, 0);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0xF8){ // SED
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.set_flag(CPU.D_FLAG, 1);
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0x8A){ // TXA
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.acc = this.x_reg;
             this.set_flag(CPU.N_FLAG,  this.acc & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -887,11 +929,13 @@ class CPU{
             return 2;
         }
         if (opcode == 0x9A){ // TXS
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.stack_ptr = this.x_reg;
             this.prg_counter++;
             return 2;
         }
         if (opcode == 0xAA){ // TAX
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.x_reg = this.acc;
             this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.x_reg);
@@ -899,6 +943,7 @@ class CPU{
             return 2;
         }
         if (opcode == 0xBA){ // TSX
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.x_reg = this.stack_ptr;
             this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.x_reg);
@@ -906,6 +951,7 @@ class CPU{
             return 2;
         }
         if (opcode == 0xCA){ // DEX
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.x_reg = (this.x_reg - 1) & 0xFF;
             this.set_flag(CPU.N_FLAG,  this.x_reg & 0x80);
             this.set_flag(CPU.Z_FLAG, !this.x_reg);
@@ -913,6 +959,7 @@ class CPU{
             return 2;
         }
         if (opcode == 0xEA){ // NOP
+            this.nes.mmap.get_byte(this.prg_counter+1);
             // Lmao what do you want me to do bruhhhhhh
             this.prg_counter++;
             return 2;
@@ -1037,8 +1084,6 @@ class CPU{
          || (opcode == 0xDC)
          || (opcode == 0xFC)){
             let data = this.indexed_abs_x();
-            // Fetches from abs, X and abs, X - 256 if a
-            // page boundary is crossed, for some reason
             this.nes.mmap.get_byte(data.addr);
             if (data.page_crossed) this.nes.mmap.get_byte((data.addr - 0x100) & 0xFFFF);
             this.prg_counter += 3;
@@ -1052,6 +1097,7 @@ class CPU{
          || (opcode == 0x7A)
          || (opcode == 0xDA)
          || (opcode == 0xFA)){
+            this.nes.mmap.get_byte(this.prg_counter+1);
             this.prg_counter += 2;
             return 2;
         }
@@ -1195,6 +1241,7 @@ class CPU{
         switch (op_id){
             case 0x00:{ // SLO
                 let val = this.nes.mmap.get_byte(data.addr);
+                if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
                 this.set_flag(CPU.C_FLAG, val & 0x80);
                 val = (val << 1) & 0xFF;
                 this.nes.mmap.set_byte(data.addr, val);
@@ -1207,6 +1254,7 @@ class CPU{
             }
             case 0x01:{ // RLA
                 let val = this.nes.mmap.get_byte(data.addr);
+                this.nes.mmap.set_byte(data.addr, val);
                 let old_high_bit = val & 0x80;
                 val = (val << 1) | this.get_flag(CPU.C_FLAG);
                 this.set_flag(CPU.C_FLAG, old_high_bit);
@@ -1220,6 +1268,7 @@ class CPU{
             }
             case 0x02:{ // SRE
                 let val = this.nes.mmap.get_byte(data.addr);
+                this.nes.mmap.set_byte(data.addr, val);
                 this.set_flag(CPU.C_FLAG, val & 0x01);
                 val >>>= 1;
                 this.nes.mmap.set_byte(data.addr, val);
@@ -1232,6 +1281,7 @@ class CPU{
             }
             case 0x03:{ // RRA
                 let val = this.nes.mmap.get_byte(data.addr);
+                this.nes.mmap.set_byte(data.addr, val);
                 let old_low_bit = val & 0x01;
                 val = (val >>> 1) | (this.get_flag(CPU.C_FLAG) << 7);
                 this.set_flag(CPU.C_FLAG, old_low_bit);
@@ -1300,8 +1350,10 @@ class CPU{
                 break;
             }
             case 0x06:{ // DCP
+                this.nes.mmap.set_byte(data.addr, this.nes.mmap.get_byte(data.addr));
                 this.nes.mmap.set_byte(data.addr, (this.nes.mmap.get_byte(data.addr) - 1) & 0xFF);
                 let val = this.nes.mmap.get_byte(data.addr);
+                this.nes.mmap.set_byte(data.addr, val);
                 let result = this.acc + ones_comp(val) + 1;
                 this.set_flag(CPU.C_FLAG, result & 0x100);
                 result &= 0xFF;
@@ -1312,6 +1364,7 @@ class CPU{
                 break;
             }
             case 0x07:{ // ISC
+                this.nes.mmap.set_byte(data.addr, this.nes.mmap.get_byte(data.addr));
                 this.nes.mmap.set_byte(data.addr, (this.nes.mmap.get_byte(data.addr) + 1) & 0xFF);
                 let val = ones_comp(this.nes.mmap.get_byte(data.addr));
                 let result = this.acc + val + this.get_flag(CPU.C_FLAG);
