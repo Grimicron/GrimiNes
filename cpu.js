@@ -161,7 +161,6 @@ class CPU{
         low += this.x_reg;
         let page_cross = low > 0xFF;
         low &= 0xFF;
-        if (page_cross) this.nes.mmap.get_byte((high << 8) | low);
         high = (high + page_cross) & 0xFF;
         return {bytes_used: 2, addr: (high << 8) | low, page_crossed: page_cross};
     }
@@ -174,7 +173,6 @@ class CPU{
         low += this.y_reg;
         let page_cross = low > 0xFF;
         low &= 0xFF;
-        if (page_cross) this.nes.mmap.get_byte((high << 8) | low);
         high = (high + page_cross) & 0xFF;
         return {bytes_used: 2, addr: (high << 8) | low, page_crossed: page_cross};
     }
@@ -216,7 +214,6 @@ class CPU{
         low += this.y_reg;
         let page_cross = low > 0xFF;
         low &= 0xFF;
-        if (page_cross) this.nes.mmap.get_byte((high << 8) | low);
         high = (high + page_cross) & 0xFF;
         return {bytes_used: 1, addr: (high << 8) | low, page_crossed: page_cross};
     }
@@ -458,6 +455,15 @@ class CPU{
             // Curly braces in the cases because of weird
             // JS scoping shenanigans
             case 0x0:{ // ORA
+                // READ instructions automatically perform a read to the
+                // indexed address before handling the potential page-cross,
+                // and then if the page did actually cross, re-perform the read
+                // to get the actual address, so if you see this snippet in an
+                // instruction, it's just emulating that dummy read
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.acc |= this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                 this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -466,6 +472,10 @@ class CPU{
                 break;
             }
             case 0x1:{ // AND
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.acc &= this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                 this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -474,6 +484,10 @@ class CPU{
                 break;
             }
             case 0x2:{ // EOR
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.acc ^= this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                 this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -482,6 +496,10 @@ class CPU{
                 break;
             }
             case 0x3:{ // ADC
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 let result = this.acc + val + this.get_flag(CPU.C_FLAG);
                 this.set_flag(CPU.C_FLAG, result & 0x100);
@@ -501,12 +519,25 @@ class CPU{
                 // actual memory address to store the accumulator,
                 // using immediate addressing mode makes no sense
                 if (op_addr_mode == 0x2) return null;
+                // RMW and WRITE instructions all perform a dummy read
+                // of the indexed address before handling the potential page-cross,
+                // so if you see this snippet in an instruction, it's basically
+                // just peforming that dummy read if the opcode was in an addressing
+                // mode that could page-cross
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.nes.mmap.set_byte(data.addr, this.acc);
                 this.prg_counter += data.bytes_used + 1;
                 return data.cycles;
                 break;
             }
             case 0x5:{ // LDA
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.acc = this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                 this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -515,6 +546,10 @@ class CPU{
                 break;
             }
             case 0x6:{ // CMP
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 let result = this.acc + ones_comp(val) + 1;
                 this.set_flag(CPU.C_FLAG, result & 0x100);
@@ -526,6 +561,10 @@ class CPU{
                 break;
             }
             case 0x7:{ // SBC
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 // M - N - B = M + ones_comp(N) + C
                 let val = ones_comp(this.nes.mmap.get_byte(data.addr));
                 let result = this.acc + val + this.get_flag(CPU.C_FLAG);
@@ -548,6 +587,10 @@ class CPU{
             case 0x0:{ // ASL
                 // Immediate addressing mode not allowed
                 if (op_addr_mode == 0x0) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                }
                 // Handle accumulator addressing mode
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
                 if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
@@ -565,6 +608,10 @@ class CPU{
             case 0x1:{ // ROL
                 // Immediate addressing mode not allowed
                 if (op_addr_mode == 0x0) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 // Same as before
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
                 if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
@@ -582,6 +629,10 @@ class CPU{
             case 0x2:{ // LSR
                 // Immediate addressing mode not allowed
                 if (op_addr_mode == 0x0) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 // Same as before
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
                 if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
@@ -599,6 +650,10 @@ class CPU{
             case 0x3:{ // ROR
                 // Immediate addressing mode not allowed
                 if (op_addr_mode == 0x0) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 // Same as before
                 let val = (op_addr_mode == 0x2) ? this.acc : this.nes.mmap.get_byte(data.addr);
                 if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
@@ -621,6 +676,10 @@ class CPU{
                 if ((op_addr_mode == 0x7)
                   ||(op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x2)) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.nes.mmap.set_byte(data.addr, this.x_reg);
                 this.prg_counter += data.bytes_used + 1;
                 return data.cycles;
@@ -629,6 +688,10 @@ class CPU{
             case 0x5:{ // LDX
                 // Accumulator addressing mode not allowed
                 if (op_addr_mode == 0x2) return null;
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.x_reg = this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.Z_FLAG, !this.x_reg);
                 this.set_flag(CPU.N_FLAG, this.x_reg & 0x80);
@@ -640,6 +703,10 @@ class CPU{
                 // Immediate and accumulator addressing modes not allowed
                 if ((op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x2)) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 this.nes.mmap.set_byte(data.addr, val);
                 val = (val - 1) & 0xFF;
@@ -654,6 +721,10 @@ class CPU{
                 // Immediate and accumulator addressing modes not allowed
                 if ((op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x2)) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 this.nes.mmap.set_byte(data.addr, val);
                 val = (val + 1) & 0xFF;
@@ -677,6 +748,10 @@ class CPU{
                 if ((op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x5)
                   ||(op_addr_mode == 0x7)) return null;
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 // I think this is how it's done, but it could
                 // be that its the 7th and 6th bits of the RESULT
@@ -695,12 +770,20 @@ class CPU{
                 // not allowed for this intruction
                 if ((op_addr_mode == 0x0)
                   ||(op_addr_mode == 0x7)) return null;
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.nes.mmap.set_byte(data.addr, this.y_reg);
                 this.prg_counter += data.bytes_used + 1;
                 return data.cycles;
                 break;
             }
             case 0x5:{ // LDY
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.y_reg = this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.N_FLAG, this.y_reg & 0x80);
                 this.set_flag(CPU.Z_FLAG, !this.y_reg);
@@ -765,7 +848,9 @@ class CPU{
         // Check for all the single byte instructions since they don't really
         // fit any pattern
         // All instructions perform a dummy fetch to PC+1, regardless of if
-        // they use it or not
+        // they use it or not, so we just hard-code that in for all one-byte
+        // instructions as well as BRK (which is a two-byte opcode but whose
+        // second byte doesn't do anything and is just filler)
         if (opcode == 0x00){ // BRK
             this.nes.mmap.get_byte(this.prg_counter+1);
             // I think I_FLAG only blocks external IRQs
@@ -1086,8 +1171,11 @@ class CPU{
          || (opcode == 0xDC)
          || (opcode == 0xFC)){
             let data = this.indexed_abs_x();
+            if (data.page_crossed){
+                let addr = (data.addr - 0x0100) & 0xFFFF;
+                this.nes.mmap.get_byte(addr);
+            };
             this.nes.mmap.get_byte(data.addr);
-            if (data.page_crossed) this.nes.mmap.get_byte((data.addr - 0x100) & 0xFFFF);
             this.prg_counter += 3;
             return 4 + data.page_crossed;
         }
@@ -1104,6 +1192,10 @@ class CPU{
             return 2;
         }
         if (opcode == 0x9C){ // SHY abs, X
+            if (data.page_crossed != undefined){
+                let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                this.nes.mmap.get_byte(addr);
+            };
             // This opcode is really weird and unstable
             let val = (this.nes.mmap.get_byte(this.prg_counter + 1) + 1) & 0xFF;
             this.nes.mmap.set_byte(this.indexed_abs_x().addr, this.y_reg & val);
@@ -1111,6 +1203,10 @@ class CPU{
             return 5;
         }
         if (opcode == 0x9E){ // SHX abs, Y
+            if (data.page_crossed != undefined){
+                let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                this.nes.mmap.get_byte(addr);
+            };
             // Same as the one above but with X and Y switched
             // And yes, it's just as weird and unstable
             let val = (this.nes.mmap.get_byte(this.prg_counter + 1) + 1) & 0xFF;
@@ -1242,6 +1338,10 @@ class CPU{
         // exceptions, though)
         switch (op_id){
             case 0x00:{ // SLO
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 if (op_addr_mode != 0x02) this.nes.mmap.set_byte(data.addr, val);
                 this.set_flag(CPU.C_FLAG, val & 0x80);
@@ -1255,6 +1355,10 @@ class CPU{
                 break;
             }
             case 0x01:{ // RLA
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 this.nes.mmap.set_byte(data.addr, val);
                 let old_high_bit = val & 0x80;
@@ -1269,6 +1373,10 @@ class CPU{
                 break;
             }
             case 0x02:{ // SRE
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 this.nes.mmap.set_byte(data.addr, val);
                 this.set_flag(CPU.C_FLAG, val & 0x01);
@@ -1282,6 +1390,10 @@ class CPU{
                 break;
             }
             case 0x03:{ // RRA
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 let val = this.nes.mmap.get_byte(data.addr);
                 this.nes.mmap.set_byte(data.addr, val);
                 let old_low_bit = val & 0x01;
@@ -1302,7 +1414,11 @@ class CPU{
             case 0x04:{ // SAX
                 // This opcode has a couple other exceptions apart from the
                 // immediate addressing mode one
-                if ((op_addr_mode == 0x04) || (op_addr_mode == 0x07)){ // AHX
+                if ((op_addr_mode == 0x04) || (op_addr_mode == 0x07)){ // SHA
+                    if (data.page_crossed != undefined){
+                        let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                        this.nes.mmap.get_byte(addr);
+                    };
                     // Kind of unstable in real hardware, but I will
                     // implement what should theoritically happen
                     let val = this.acc & this.x_reg & (this.nes.mmap.get_byte(this.prg_counter + 1) + 1);
@@ -1312,6 +1428,10 @@ class CPU{
                     break;
                 }
                 if (op_addr_mode == 0x06){ // TAS
+                    if (data.page_crossed){
+                        let addr = (data.addr - 0x0100) & 0xFFFF;
+                        this.nes.mmap.get_byte(addr);
+                    };
                     // Weird and unstable opcode, but again, I'll
                     // implement what is supposed to happen in theory
                     this.stack_ptr = this.acc & this.x_reg;
@@ -1324,6 +1444,10 @@ class CPU{
                     return 3;
                     break;
                 }
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.nes.mmap.set_byte(data.addr, this.acc & this.x_reg);
                 this.prg_counter += data.bytes_used + 1;
                 return data.cycles;
@@ -1333,6 +1457,10 @@ class CPU{
                 // This opcode has another exception apart from the
                 // one with the immediate addressing mode we covered earlier
                 if (op_addr_mode == 0x06){ // LAS
+                    if (data.page_crossed){
+                        let addr = (data.addr - 0x0100) & 0xFFFF;
+                        this.nes.mmap.get_byte(addr);
+                    };
                     // Just plain weird opcode and frankly useless for any
                     // actual coding purpose
                     let val = this.nes.mmap.get_byte(data.addr) & this.stack_ptr;
@@ -1343,6 +1471,10 @@ class CPU{
                     return data.cycles;
                     break;
                 }
+                if (data.page_crossed){
+                    let addr = (data.addr - 0x0100) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.acc = this.nes.mmap.get_byte(data.addr);
                 this.set_flag(CPU.N_FLAG, this.acc & 0x80);
                 this.set_flag(CPU.Z_FLAG, !this.acc);
@@ -1352,6 +1484,10 @@ class CPU{
                 break;
             }
             case 0x06:{ // DCP
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.nes.mmap.set_byte(data.addr, this.nes.mmap.get_byte(data.addr));
                 this.nes.mmap.set_byte(data.addr, (this.nes.mmap.get_byte(data.addr) - 1) & 0xFF);
                 let val = this.nes.mmap.get_byte(data.addr);
@@ -1366,6 +1502,10 @@ class CPU{
                 break;
             }
             case 0x07:{ // ISC
+                if (data.page_crossed != undefined){
+                    let addr = (data.addr - (data.page_crossed ? 0x0100 : 0x0000)) & 0xFFFF;
+                    this.nes.mmap.get_byte(addr);
+                };
                 this.nes.mmap.set_byte(data.addr, this.nes.mmap.get_byte(data.addr));
                 this.nes.mmap.set_byte(data.addr, (this.nes.mmap.get_byte(data.addr) + 1) & 0xFF);
                 let val = ones_comp(this.nes.mmap.get_byte(data.addr));
