@@ -5,12 +5,27 @@ html, body{
     padding: 0%;
     overflow: hidden;
     background-color: #1c1c1c;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+}
+
+div{
+    pointer-events: auto;
+}
+
+#game-container{
+    height: 100%;
+    width: 100%;
+    margin: 0%;
+    padding: 0%;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
 }
 
-canvas{
+#screen{
     image-rendering: crisp-edges;
     display: none;
     margin: 0%;
@@ -19,27 +34,111 @@ canvas{
     height: min(100vh, 93.75vw);
 }
 
-input{
+#rom-input{
     display: none;
 }
 
-button{
+#rom-button{
     background-color: #ffffff;
     border: none;
     border-radius: 5px;
     padding: 10px;
     margin: 5px;
     cursor: pointer;
+    color: #1c1c1c;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 1.3em;
 }
 
-p{
+#fps-counter{
     position: absolute;
     top: 5px;
     left: 5px;
     color: #ffffff;
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 20px;
+    font-size: 1.3em;
     margin: 0%;
     padding: 0%;
     z-index: 1;
+}
+
+a{
+    color: #ffffff;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 1.3em;
+    margin: 0.25em;
+}
+
+#tactile-overlay{
+    display: none;
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    width: 100%;
+    height: 100%;
+}
+
+.tactile-button{
+    margin: 0%;
+    padding: 0%;
+    width: auto;
+    height: auto;
+    position: absolute;
+    opacity: 0.5;
+}
+
+#bt-a{
+    max-width: 13vw;
+    max-height: 13vw;
+    right: 5px;
+    bottom: calc(10vw + 5px);
+}
+
+#bt-b{
+    max-width: 13vw;
+    max-height: 13vw;
+    right: calc(13vw + 7px);
+    bottom: calc(10vw + 5px);
+}
+
+#bt-select{
+    max-width: 10vw;
+    max-height: 10vw;
+    left: 5px;
+    bottom: 5px;
+}
+
+#bt-start{
+    max-width: 10vw;
+    max-height: 10vw;
+    right: 5px;
+    bottom: 5px;
+}
+
+#bt-up{
+    max-width: 7vw;
+    max-height: 14vw;
+    left: calc(7vw + 5px);
+    bottom: calc(17vw + 12px);
+}
+
+#bt-down{
+    max-width: 7vw;
+    max-height: 7vw;
+    left: calc(7vw + 5px);
+    bottom: calc(10vw + 10px);
+}
+
+#bt-left{
+    max-width: 7vw;
+    max-height: 7vw;
+    left: 5px;
+    bottom: calc(16vw + 12px);
+}
+
+#bt-right{
+    max-width: 7vw;
+    max-height: 7vw;
+    left: calc(14vw + 5px);
+    bottom: calc(16vw + 15px);
 }

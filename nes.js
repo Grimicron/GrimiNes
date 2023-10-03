@@ -26,7 +26,7 @@ class NES{
             down:   13,
             left:   14,
             right:  15,
-        });
+        }, "tactile-button");
         this.keep_logs = false;
         this.prev_ts = 0;
         this.fps_update_ts = 0;
@@ -49,6 +49,7 @@ class NES{
         this.prev_ts = window.performance.now() / 1000;
         this.fps_update_ts = this.prev_ts;
         this.controller.bind_keys();
+        this.controller.bind_buttons();
         this.mmap.load_rom(rom);
         this.ppu.init_buffer();
         this.ppu.load_normal_palette();
@@ -75,13 +76,15 @@ class NES{
             // For now, as a temporary bootstrapping for testing, we'll just put the
             // CPU cycles along with the PPU dots and make them execute once every 3 dots
             // since a CPU cycle is basically 3 PPU dots
-            if ((!(i % 3)) && this.cpu_wait_cycles) this.cpu_wait_cycles--;
-            else{
-                if (this.keep_logs) this.logger.cpu_log();
-                this.cpu_wait_cycles += this.cpu.exec_op();
+            if ((i % 3) == 0){
+                if (this.cpu_wait_cycles == 0){
+                    if (this.keep_logs) this.logger.cpu_log();
+                    this.cpu_wait_cycles += this.cpu.exec_op();
+                }
+                this.cpu_wait_cycles--;
             }
-            if (this.ppu_wait_dots) this.ppu_wait_dots--;
-            else                    this.ppu_wait_dots += this.ppu.exec_dot_group();
+            if (this.ppu_wait_dots == 0) this.ppu_wait_dots += this.ppu.exec_dot_group();
+            this.ppu_wait_dots--;
         }
         this.update_screen();
         if ((now_ts - this.fps_update_ts) >= 1) this.update_fps(now_ts);

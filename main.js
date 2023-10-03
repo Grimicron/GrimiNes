@@ -4,6 +4,7 @@ let canvas     = null;
 let ctx        = null;
 let fr         = null;
 let my_nes     = null;
+let bt_overlay = null;
 
 function dump_pattern_table(offset){
     let palette = [
@@ -44,8 +45,11 @@ function frame(){
 }
 
 function init_nes(rom){
+    // Only activate overlay if the device has touch features
+    if(window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
     canvas.style.display = "block";
     rom_button.style.display = "none";
+    document.querySelectorAll("a").forEach((a) => { a.style.display = "none"; });
     my_nes.init(ctx, rom);
     window.requestAnimationFrame(frame);
 }
@@ -53,6 +57,7 @@ function init_nes(rom){
 function try_uri_load(){
     let rom_name = window.location.search.split("?")[1];
     if (!rom_name) return;
+    if (!rom_name.endsWith(".nes")) rom_name += ".nes";
     let req = new XMLHttpRequest();
     req.open("GET", "roms/" + rom_name, true);
     req.responseType = "arraybuffer";
@@ -65,6 +70,7 @@ function try_uri_load(){
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    bt_overlay = document.getElementById("tactile-overlay");
     rom_input  = document.getElementById("rom-input");
     rom_button = document.getElementById("rom-button");
     canvas     = document.getElementById("screen");

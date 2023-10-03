@@ -1,15 +1,36 @@
 <!DOCTYPE html>
 <html>
 	<head>
-		<title>VisNes</title>
-		<meta charset="UTF-8"/>
+		<title>GrimiNes</title>
+        <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/> 
 		<link rel="stylesheet" href="style.css"/>
 	</head>
 	<body>
-		<input id="rom-input" type="file" name="rom-input"/>
-        <button id="rom-button">Select ROM</button>
+        <div id="game-container">
+		    <input id="rom-input" type="file" name="rom-input"/>
+            <button id="rom-button">Select ROM</button>
+            <a href="https://grimines.replit.app/?arkanoid.nes"   >Arkanoid</a>
+            <a href="https://grimines.replit.app/?castlevania.nes">Castlevania</a>
+            <a href="https://grimines.replit.app/?commando.nes"   >Commando</a>
+            <a href="https://grimines.replit.app/?contra.nes"     >Contra</a>
+            <a href="https://grimines.replit.app/?donkeykong.nes" >Donkey Kong</a>
+            <a href="https://grimines.replit.app/?galaga.nes"     >Galaga</a>
+            <a href="https://grimines.replit.app/?iceclimber.nes" >Ice Climber</a>
+            <a href="https://grimines.replit.app/?megaman.nes"    >Mega Man</a>
+            <a href="https://grimines.replit.app/?smb.nes"        >Super Mario Bros.</a>
+            <canvas id="screen" width="256" height="240"></canvas>
+        </div>
         <p id="fps-counter"></p>
-        <canvas id="screen" width="256" height="240"></canvas>
+        <div id="tactile-overlay">
+            <img class="tactile-button" id="bt-a"      src="./img/nes_controller_a.png"     />
+            <img class="tactile-button" id="bt-b"      src="./img/nes_controller_b.png"     />
+            <img class="tactile-button" id="bt-select" src="./img/nes_controller_select.png"/>
+            <img class="tactile-button" id="bt-start"  src="./img/nes_controller_start.png" />
+            <img class="tactile-button" id="bt-up"     src="./img/nes_controller_up.png"    />
+            <img class="tactile-button" id="bt-down"   src="./img/nes_controller_down.png"  />
+            <img class="tactile-button" id="bt-left"   src="./img/nes_controller_left.png"  />
+            <img class="tactile-button" id="bt-right"  src="./img/nes_controller_right.png" />
+        </div>
         <script src="utils.js"     ></script>
         <script src="logger.js"    ></script>
         <script src="mappers.js"   ></script>

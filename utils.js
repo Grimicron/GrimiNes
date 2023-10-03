@@ -25,12 +25,12 @@ function bn_fmt(num, nibbles=4, prefix=false){
 }
 
 function download(filename, data){
-    let element = document.createElement("a");
+    let el = document.createElement("a");
     let file = new Blob(data, { type: "text/plain" });
-    element.href = URL.createObjectURL(file);
-    element.download = filename;
-    element.style.display = "none";
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    el.href = URL.createObjectURL(file);
+    el.download = filename;
+    el.style.display = "none";
+    document.body.appendChild(el);
+    el.click();
+    document.body.removeChild(el);
 }

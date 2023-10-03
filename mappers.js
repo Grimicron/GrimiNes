@@ -8,6 +8,8 @@ class NROM{ // iNES Mapper #000
         this.ppu_pal_ram    = new Uint8Array(0x20);
         this.mem_mirror_map = new Uint16Array(0x10000);
         this.ppu_mirror_map = new Uint16Array(0x04000);
+        // Used by some test ROMs to write their output
+        // in ASCII form in addition to printing on screen
         this.debug_out      = new Uint8Array(0x1000);
     }
 
@@ -117,7 +119,11 @@ class NROM{ // iNES Mapper #000
     }
 
     ppu_write(addr, val){
-        //if ((addr >= 0x0000) && (addr <= 0x1FFF)) this.chr_rom[addr] = val;
+        // Some test ROMs provide 0 CHR ROM and manually write to it themselves,
+        // so we can do this little work around
+        if ((addr >= 0x0000) && (addr <= 0x1FFF) && (this.mmap.rom_flags[5] == 0)){
+            this.chr_rom[addr] = val;
+        }
         if ((addr >= 0x2000) && (addr <= 0x2FFF)) this.ppu_vram[addr - 0x2000] = val;
         if ((addr >= 0x3F00) && (addr <= 0x3F1F)) this.ppu_pal_ram[addr - 0x3F00] = val;
     }
@@ -144,14 +150,16 @@ class UXROM extends NROM{ // iNes Mapper #002
     }
 
     write(addr, val){
+        if ((addr >= 0x0000) && (addr <= 0x07FF)) this.cpu_ram[addr] = val;
+        if ((addr >= 0x6000) && (addr <= 0x7FFF)) this.debug_out[addr - 0x6000] = val;
         if ((addr >= 0x8000) && (addr <= 0xFFFF)) this.prg_rom_bank = Math.min(val & 0x0F, this.mmap.rom_flags[4] - 1);
-        super.write(addr, val);
     }
 
     ppu_write(addr, val){
         // UxROM uses CHR RAM instead of CHR ROM
         if ((addr >= 0x0000) && (addr <= 0x1FFF)) this.chr_rom[addr] = val;
-        super.ppu_write(addr, val);
+        if ((addr >= 0x2000) && (addr <= 0x2FFF)) this.ppu_vram[addr - 0x2000] = val;
+        if ((addr >= 0x3F00) && (addr <= 0x3F1F)) this.ppu_pal_ram[addr - 0x3F00] = val;
     }
 }
 
@@ -169,13 +177,15 @@ class CNROM extends NROM{ // iNES Mapper #003
     }
 
     write(addr, val){
-        super.write(addr, val);
+        if ((addr >= 0x0000) && (addr <= 0x07FF)) this.cpu_ram[addr] = val;
+        if ((addr >= 0x6000) && (addr <= 0x7FFF)) this.debug_out[addr - 0x6000] = val;
         if ((addr >= 0x8000) && (addr <= 0xFFFF)) this.chr_bank = val & 0x3;
     }
     
     ppu_read(addr){
         if ((addr >= 0x0000) && (addr <= 0x1FFF)) return this.chr_rom[(this.chr_bank << 13) | addr];
-        return super.ppu_read(addr);
+        if ((addr >= 0x2000) && (addr <= 0x2FFF)) return this.ppu_vram[addr - 0x2000];
+        if ((addr >= 0x3F00) && (addr <= 0x3F1F))  return this.ppu_pal_ram[addr - 0x3F00];
     }
 }
 

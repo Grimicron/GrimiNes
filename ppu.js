@@ -288,6 +288,9 @@ class PPU{
             let spr_offset = scan_index - this.sec_oam[i];
             // Vertical sprite flip
             if (this.sec_oam[i+2] & 0x80) spr_offset = spr_size - spr_offset - 1;
+            // Skip high color plane of first sprite tile if sprite mode is 8x16
+            // and we are rendering the second sprite tile
+            if (spr_offset > 0x07) spr_offset = 0x10 | (spr_offset & 0x07);
             // For a more detailed explanation of pattern table fetching for OAM
             // sprites, see the wiki page:
             // https://www.nesdev.org/wiki/PPU_OAM#Byte_1
@@ -357,27 +360,19 @@ class PPU{
             // https://www.nesdev.org/wiki/PPU_attribute_tables
             // AT address formula taken directly from NesDev wiki
             // https://www.nesdev.org/wiki/PPU_scrolling
-            let at_addr   = 0x23C0                    // Base AT address
-                        |  (this.reg_v & 0x0C00)      // NT select
-                        | ((this.reg_v >> 4) & 0x38)  // High AT index bits
-                        | ((this.reg_v >> 2) & 0x07); // Low AT index bits
-            let at_sector = ((this.reg_v & 0x08) >>> 2) // Top (0) / Bottom (1) bit
-                           | (this.reg_v & 0x01);       // Left (0) / Right (1) bit
-            let at_group  = this.nes.mmap.ppu_get_byte(at_addr);
+            let at_addr   = 0x23C0                       // Base AT address
+                          | (this.reg_v & 0x0C00)         // NT select
+                          | ((this.reg_v & 0x380) >>> 4)  // High AT index bits
+                          | ((this.reg_v &  0x1C) >>> 2); // Low AT index bits
+            let at_sector = ((this.reg_v &  0x40) >>> 5)  // Top (0) / Bottom (1) bit (MSB)
+                          | ((this.reg_v &  0x02) >>> 1); // Left (0) / Right (1) bit (LSB)
+            let at_val    = this.nes.mmap.ppu_get_byte(at_addr);
             let pal       = null;
             // It's easier just to hardcode this part
-            if      (at_sector == 0x00){
-                pal = (at_group & 0x03) >>> 0;
-            }
-            else if (at_sector == 0x01){
-                pal = (at_group & 0x0C) >>> 2;
-            }
-            else if (at_sector == 0x02){
-                pal = (at_group & 0x30) >>> 4;
-            }
-            else if (at_sector == 0x03){
-                pal = (at_group & 0xC0) >>> 6;
-            }
+            if      (at_sector == 0x00) pal = (at_val & 0x03) >>> 0; // Top left
+            else if (at_sector == 0x01) pal = (at_val & 0x0C) >>> 2; // Top right
+            else if (at_sector == 0x02) pal = (at_val & 0x30) >>> 4; // Bottom left
+            else if (at_sector == 0x03) pal = (at_val & 0xC0) >>> 6; // Bottom right
             // Explained above, in sprite_scanline()
             if (!color) pal = 0x00;
             buffer[i] = ((!!color)<<7) | this.nes.mmap.ppu_get_byte(0x3F00 | (pal << 2) | color);

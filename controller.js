@@ -1,5 +1,5 @@
 class CONTROLLER{
-    constructor(p_nes, p_keybinds, p_gpbinds, p_bt_binds){
+    constructor(p_nes, p_keybinds, p_gpbinds, p_bt_class){
         this.nes          = p_nes;
         // p_keybinds is an object which has 8 properties:
         // a, b, select, start, up, down, left, right
@@ -10,13 +10,17 @@ class CONTROLLER{
         this.gp_connected = false;
         this.gp_binds     = p_gpbinds;
         this.gp_index     = 0;
+        // Tactile buttons class (each button will has a property
+        // which describes which button they correspond to)
+        this.bt_class     = p_bt_class;
         // An array with the state of the controller
         // since it was last updated
         // It's in the order laid out above
         this.state        = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        // The actual state of the controller on the keyboard and gamepad
+        // The actual state of the controller on the keyboard, gamepad and tactile buttons
         this.kb_state     = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         this.gp_state     = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        this.bt_state     = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         // Increases with each successive read of of 0x4016
         // and determines which status bit is sent back
         this.read_index   = 0x00;
@@ -26,7 +30,7 @@ class CONTROLLER{
     }
 
     // This function simply halfs the code size, not much else to it
-    handle_change(key, pressed){
+    kb_handle_change(key, pressed){
         switch (key){
             case this.keybinds.a:
                 this.kb_state[0] = pressed;
@@ -55,18 +59,47 @@ class CONTROLLER{
         }
     }
 
+    bt_handle_change(button, pressed){
+        switch (button){
+            case "a":
+                this.bt_state[0] = pressed;
+                break;
+            case "b":
+                this.bt_state[1] = pressed;
+                break;
+            case "select":
+                this.bt_state[2] = pressed;
+                break;
+            case "start":
+                this.bt_state[3] = pressed;
+                break;
+            case "up":
+                this.bt_state[4] = pressed;
+                break;
+            case "down":
+                this.bt_state[5] = pressed;
+                break;
+            case "left":
+                this.bt_state[6] = pressed;
+                break;
+            case "right":
+                this.bt_state[7] = pressed;
+                break;
+        }
+    }
+    
     bind_keys(){
         document.addEventListener("keydown", (e) => {
             // Only cancel default and handle event if the key is in our keybinds
             if (!Object.values(this.keybinds).includes(e.code)) return;
             if (e.cancelable) e.preventDefault();
-            this.handle_change(e.code, 0x01);
+            this.kb_handle_change(e.code, 0x01);
         });
         document.addEventListener("keyup",   (e) => {
             // Same as before
             if (!Object.values(this.keybinds).includes(e.code)) return;
             if (e.cancelable) e.preventDefault();
-            this.handle_change(e.code, 0x00);
+            this.kb_handle_change(e.code, 0x00);
         });
         // We also set up our controller API listeners here
         window.addEventListener("gamepadconnected",    (e) => {
@@ -79,6 +112,35 @@ class CONTROLLER{
         })
     };
 
+    bind_buttons(){
+        Array.from(document.getElementsByClassName(this.bt_class)).forEach((bt) => {
+            bt.addEventListener("touchstart", (e) => {
+                this.bt_handle_change(bt.id.split("-")[1], 0x01);
+                // Stop unwanted selections/zooms
+                if (!e.cancelable) return;
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            bt.addEventListener("touchend",   (e) => {
+                this.bt_handle_change(bt.id.split("-")[1], 0x00);
+                // Same as before
+                if (!e.cancelable) return;
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+        document.addEventListener("touchstart", (e) => {
+            if (!e.cancelable) return;
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        document.addEventListener("touchstart", (e) => {
+            if (!e.cancelable) return;
+            e.preventDefault();
+            e.stopPropagation();
+        });
+    }
+    
     read_gamepad(){
         // Since the controller API has a simple interface where we can simply
         // poll the state of the controller, we don't have to do event-based
@@ -107,7 +169,7 @@ class CONTROLLER{
     update(){
         this.read_gamepad();
         for (let i = 0; i < this.state.length; i++){
-            this.state[i] = this.kb_state[i] | this.gp_state[i];
+            this.state[i] = this.kb_state[i] | this.gp_state[i] | this.bt_state[i];
         }
         this.read_index = 0x00;
     }
