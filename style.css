@@ -38,7 +38,7 @@ div{
     display: none;
 }
 
-#rom-button{
+button{
     background-color: #ffffff;
     border: none;
     border-radius: 5px;
@@ -50,23 +50,34 @@ div{
     font-size: 1.3em;
 }
 
+#reset-button{
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    display: none;
+    z-index: 99;
+}
+
+p{
+    color: #ffffff;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 1.3em;
+}
+
 #fps-counter{
     position: absolute;
     top: 5px;
     left: 5px;
-    color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 1.3em;
     margin: 0%;
     padding: 0%;
     z-index: 1;
 }
 
-a{
-    color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 1.3em;
+.quick-rom-select{
     margin: 0.25em;
+    padding: 0%;
+    text-decoration-line: underline;
+    cursor: pointer;
 }
 
 #tactile-overlay{

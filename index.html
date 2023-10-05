@@ -9,16 +9,17 @@
         <div id="game-container">
 		    <input id="rom-input" type="file" name="rom-input"/>
             <button id="rom-button">Select ROM</button>
-            <a href="https://grimines.replit.app/?arkanoid.nes"   >Arkanoid</a>
-            <a href="https://grimines.replit.app/?castlevania.nes">Castlevania</a>
-            <a href="https://grimines.replit.app/?commando.nes"   >Commando</a>
-            <a href="https://grimines.replit.app/?contra.nes"     >Contra</a>
-            <a href="https://grimines.replit.app/?donkeykong.nes" >Donkey Kong</a>
-            <a href="https://grimines.replit.app/?galaga.nes"     >Galaga</a>
-            <a href="https://grimines.replit.app/?iceclimber.nes" >Ice Climber</a>
-            <a href="https://grimines.replit.app/?megaman.nes"    >Mega Man</a>
-            <a href="https://grimines.replit.app/?smb.nes"        >Super Mario Bros.</a>
+            <p class="quick-rom-select" onclick="quick_load('arkanoid.nes')"   >Arkanoid</p>
+            <p class="quick-rom-select" onclick="quick_load('castlevania.nes')">Castlevania</p>
+            <p class="quick-rom-select" onclick="quick_load('commando.nes')"   >Commando</p>
+            <p class="quick-rom-select" onclick="quick_load('contra.nes')"     >Contra</p>
+            <p class="quick-rom-select" onclick="quick_load('donkeykong.nes')" >Donkey Kong</p>
+            <p class="quick-rom-select" onclick="quick_load('galaga.nes')"     >Galaga</p>
+            <p class="quick-rom-select" onclick="quick_load('iceclimber.nes')" >Ice Climber</p>
+            <p class="quick-rom-select" onclick="quick_load('megaman.nes')"    >Mega Man</p>
+            <p class="quick-rom-select" onclick="quick_load('smb.nes')"        >Super Mario Bros.</p>
             <canvas id="screen" width="256" height="240"></canvas>
+            <button id="reset-button">Reset</button>
         </div>
         <p id="fps-counter"></p>
         <div id="tactile-overlay">

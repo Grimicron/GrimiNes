@@ -39,7 +39,7 @@ class NES{
         // complete an instruction, so we wait those out to
         // be somewhat cycle-accurate and keep the timings correct
         this.cpu_wait_cycles = 0;
-        this.ppu_wait_dots   = 0;
+        this.ppu_wait_dots = 0;
         this.ctx = null;
     }
 
@@ -56,6 +56,13 @@ class NES{
         this.cpu.reset();
     }
 
+    reset(){
+        this.cpu.reset();
+        this.ppu = new PPU(this);
+        this.ppu.init_buffer();
+        this.ppu.load_normal_palette();
+    }
+    
     update_screen(){
         this.ctx.putImageData(new ImageData(this.ppu.out_buf, 256, 240), 0, 0);
     }
@@ -83,8 +90,9 @@ class NES{
                 }
                 this.cpu_wait_cycles--;
             }
-            if (this.ppu_wait_dots == 0) this.ppu_wait_dots += this.ppu.exec_dot_group();
-            this.ppu_wait_dots--;
+            //if (this.ppu_wait_dots == 0) this.ppu_wait_dots += this.ppu.exec_dot_group();
+            //this.ppu_wait_dots--;
+            this.ppu.exec_dot();
         }
         this.update_screen();
         if ((now_ts - this.fps_update_ts) >= 1) this.update_fps(now_ts);

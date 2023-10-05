@@ -189,9 +189,56 @@ class CNROM extends NROM{ // iNES Mapper #003
     }
 }
 
+class AXROM extends NROM{ // iNES Mapper #007
+    constructor(mmap){
+        super(mmap);
+        this.prg_rom_bank = 0x00;
+        this.mirror_screen = 0x0000;
+    }
+
+    load_prg_rom(rom){
+        this.prg_rom = new Uint8Array(0x40000);
+        for (let i = 0x0000; i < this.prg_rom.length; i++){
+            this.prg_rom[i] = rom[0x0010 + i];
+        }
+    }
+
+    read(addr){
+        if ((addr >= 0x0000) && (addr <= 0x07FF)) return this.cpu_ram[addr];
+        if ((addr >= 0x8000) && (addr <= 0xFFFF)) return this.prg_rom[(this.prg_rom_bank << 15) + (addr - 0x8000)];
+        return 0x00;
+    }
+
+    write(addr, val){
+        if ((addr >= 0x0000) && (addr <= 0x07FF)) this.cpu_ram[addr] = val;
+        if ((addr >= 0x6000) && (addr <= 0x7FFF)) this.debug_out[addr - 0x6000] = val;
+        if ((addr >= 0x8000) && (addr <= 0xFFFF)){
+            this.prg_rom_bank = val & 0x07;
+            this.mirror_screen = (val & 0x10) ? 0x0400 : 0x0000;
+        }
+    }
+    
+    ppu_read(addr){
+        if ((addr >= 0x0000) && (addr <= 0x1FFF)) return this.chr_rom[addr];
+        if ((addr >= 0x2000) && (addr <= 0x2FFF)) return this.ppu_vram[this.mirror_screen | (addr % 0x1000)];
+        if ((addr >= 0x3F00) && (addr <= 0x3F1F)) return this.ppu_pal_ram[addr - 0x3F00];
+        return 0x00;
+    }
+
+    ppu_write(addr, val){
+        // Same as in NROM
+        if ((addr >= 0x0000) && (addr <= 0x1FFF) && (this.mmap.rom_flags[5] == 0)){
+            this.chr_rom[addr] = val;
+        }
+        if ((addr >= 0x2000) && (addr <= 0x2FFF)) this.ppu_vram[this.mirror_screen | (addr % 0x1000)] = val;
+        if ((addr >= 0x3F00) && (addr <= 0x3F1F)) this.ppu_pal_ram[addr - 0x3F00] = val;
+    }
+}
+
 function mapper_factory(mmap, mapper_id){
     if (mapper_id == 0) return new NROM(mmap);
     if (mapper_id == 2) return new UXROM(mmap);
     if (mapper_id == 3) return new CNROM(mmap);
+    if (mapper_id == 7) return new AXROM(mmap);
     return null;
 }

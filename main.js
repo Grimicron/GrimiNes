@@ -1,10 +1,11 @@
-let rom_input  = null;
-let rom_button = null;
-let canvas     = null;
-let ctx        = null;
-let fr         = null;
-let my_nes     = null;
-let bt_overlay = null;
+let rom_input    = null;
+let rom_button   = null;
+let reset_button = null;
+let canvas       = null;
+let ctx          = null;
+let fr           = null;
+let my_nes       = null;
+let bt_overlay   = null;
 
 function dump_pattern_table(offset){
     let palette = [
@@ -49,17 +50,15 @@ function init_nes(rom){
     if(window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
     canvas.style.display = "block";
     rom_button.style.display = "none";
-    document.querySelectorAll("a").forEach((a) => { a.style.display = "none"; });
+    reset_button.style.display = "block";
+    document.querySelectorAll(".quick-rom-select").forEach((e) => { e.style.display = "none"; });
     my_nes.init(ctx, rom);
     window.requestAnimationFrame(frame);
 }
 
-function try_uri_load(){
-    let rom_name = window.location.search.split("?")[1];
-    if (!rom_name) return;
-    if (!rom_name.endsWith(".nes")) rom_name += ".nes";
+function quick_load(name){
     let req = new XMLHttpRequest();
-    req.open("GET", "roms/" + rom_name, true);
+    req.open("GET", "roms/" + name, true);
     req.responseType = "arraybuffer";
     req.overrideMimeType("text/plain");
     req.onload = () => {
@@ -69,14 +68,22 @@ function try_uri_load(){
     req.send();
 }
 
+function try_uri_load(){
+    let rom_name = window.location.search.split("?")[1];
+    if (!rom_name) return;
+    if (!rom_name.endsWith(".nes")) rom_name += ".nes";
+    quick_load(rom_name);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
-    bt_overlay = document.getElementById("tactile-overlay");
-    rom_input  = document.getElementById("rom-input");
-    rom_button = document.getElementById("rom-button");
-    canvas     = document.getElementById("screen");
-    ctx        = canvas.getContext("2d");
-    fr         = new FileReader();
-    my_nes     = new NES();
+    bt_overlay   = document.getElementById("tactile-overlay");
+    rom_input    = document.getElementById("rom-input");
+    rom_button   = document.getElementById("rom-button");
+    reset_button = document.getElementById("reset-button");
+    canvas       = document.getElementById("screen");
+    ctx          = canvas.getContext("2d");
+    fr           = new FileReader();
+    my_nes       = new NES();
     
     ctx.imageSmoothingEnabled = false;
     ctx.mozImageSmoothingEnabled = false;
@@ -91,5 +98,8 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     rom_button.onclick = () => {
         rom_input.click();
+    };
+    reset_button.onclick = () => {
+        my_nes.reset();
     };
 });
