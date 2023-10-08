@@ -343,7 +343,7 @@ class LOGGER{
         res += "S:" + hx_fmt(this.nes.cpu.stack_ptr)   + " ";
         this.log += res + "\n";
         if (this.log.length >= LOGGER.MAX_LOG_CHUNK_LENGTH){
-            download("visnes_log_part_" + this.log_index + ".log", [this.log]);
+            download("grimines_log_part_" + this.log_index + ".log", [this.log]);
             this.log = "";
             this.log_index++;
         }

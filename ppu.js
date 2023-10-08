@@ -18,7 +18,7 @@ class PPU{
         // PPU non-rendering registers
         this.reg_ctrl      = 0x00;
         this.reg_mask      = 0x00;
-        this.reg_status    = 0xA0;
+        this.reg_status    = 0x00;
         this.oam_addr      = 0x00;
         // See wiki for explanation of these names
         // Keep in mind that while these 2 registers are
@@ -71,8 +71,16 @@ class PPU{
         // Also contains what pixels have a non-zero sprite 0 pixel in them
         // Only used in scanline accurate mode
         this.prev_spr_buf  = { buf: new Uint8Array(256), sprz: new Uint8Array(256) };
-        this.img_buf       = new Uint8Array(       256 * 240 * 4);
-        this.out_buf       = new Uint8ClampedArray(256 * 240 * 4);
+        // We use double-buffering to speed up our performance significantly
+        // because we don't have to copy an entire 254760 element array,
+        // we just choose the buffer we aren't currently writing to
+        // false = bk_buf, true = fr_buf
+        this.cur_buf       = false;
+        // They will both eventually be the front buffer, but I'm
+        // naming them this because I really don't like numbers in
+        // variable names, so it was better than buf_0 and buf_1
+        this.bk_buf        = new Uint8ClampedArray(256 * 240 * 4);
+        this.fr_buf        = new Uint8ClampedArray(256 * 240 * 4);
     }
 
     set_status(pos, val){
@@ -222,30 +230,39 @@ class PPU{
         ];
     }
 
-    init_buffer(){
-        for (let i = 0; i < this.img_buf.length; i += 4){
-            this.img_buf[i + 0] = 0x00;
-            this.img_buf[i + 1] = 0x00;
-            this.img_buf[i + 2] = 0x00;
-            this.img_buf[i + 3] = 0xFF;
+    init_buffers(){
+        // We can really choose the length of either of them,
+        // they're basically the same, after all
+        for (let i = 0; i < this.bk_buf.length; i += 4){
+            // Initialize both buffers
+            this.bk_buf[i + 0] = 0x00;
+            this.bk_buf[i + 1] = 0x00;
+            this.bk_buf[i + 2] = 0x00;
+            this.bk_buf[i + 3] = 0xFF;
+            this.fr_buf[i + 0] = 0x00;
+            this.fr_buf[i + 1] = 0x00;
+            this.fr_buf[i + 2] = 0x00;
+            this.fr_buf[i + 3] = 0xFF;
         }
     }
     
     put_pixel(x, y, c){
         let i = ((y << 8) + x) * 4;
-        this.img_buf[i + 0] = c[0];
-        this.img_buf[i + 1] = c[1];
-        this.img_buf[i + 2] = c[2];
+        // Choose between our buffers depending on cur_buf
+        if (this.cur_buf){
+            this.fr_buf[i + 0] = c[0];
+            this.fr_buf[i + 1] = c[1];
+            this.fr_buf[i + 2] = c[2];
+        }
+        else{
+            this.bk_buf[i + 0] = c[0];
+            this.bk_buf[i + 1] = c[1];
+            this.bk_buf[i + 2] = c[2];
+        }
         // No need to set alpha, it's always 0xFF and has been initialized
         // in the init_buffer() function
     }
 
-    update_out_buf(){
-        for (let i = 0; i < this.img_buf.length; i++){
-            this.out_buf[i] = this.img_buf[i];
-        }
-    }
-    
     // These two functions are taken directly from the NesDev wiki
     // https://www.nesdev.org/wiki/PPU_s-crolling
     // Check there to see why this works
@@ -292,21 +309,18 @@ class PPU{
         // https://www.nesdev.org/wiki/PPU_attribute_tables
         // AT address formula taken directly from NesDev wiki
         // https://www.nesdev.org/wiki/PPU_scrolling
-        let at_addr   = 0x23C0                        // Base AT address
-                      | ( this.reg_v & 0x0C00)        // NT select
-                      | ((this.reg_v & 0x380) >>> 4)  // High AT index bits
-                      | ((this.reg_v &  0x1C) >>> 2); // Low AT index bits
+        let at_addr   = 0x23C0                         // Base AT address
+                      | ( this.reg_v & 0x0C00)         // NT select
+                      | ((this.reg_v & 0x0380) >>> 4)  // High AT index bits
+                      | ((this.reg_v & 0x001C) >>> 2); // Low AT index bits
         return this.nes.mmap.ppu_get_byte(at_addr);
     }
 
     pt_fetch(high){
-        let pt_addr = (this.reg_ctrl & 0x04 ? 0x1000 : 0x0000) // CHR bank select
+        let pt_addr = (this.reg_ctrl & 0x10 ? 0x1000 : 0x0000) // CHR bank select
                     | (this.nt_latch << 4)                     // Tile select
                     | (high << 3)                              // High/Low plane select
                     | ((this.reg_v & 0x7000) >>> 12);          // Fine Y
-        if (this.nes.mmap.ppu_get_byte(pt_addr)){
-            debug_log("non-zero pt fetch");
-        }
         return this.nes.mmap.ppu_get_byte(pt_addr);
     }
 
@@ -320,8 +334,8 @@ class PPU{
     fetch_tile_info(){
         // If rendering is disabled, don't perform fetches
         if (!(this.reg_mask & 0x18)) return;
-        // & 0x07 because the pattern loops every 8 dots
-        switch (this.dot & 0x07){
+        // % 8 because the pattern loops every 8 dots
+        switch (this.dot % 8){
             case 1:{
                 this.pt_shift_low  |= this.pt_latch_low;
                 this.pt_shift_high |= this.pt_latch_high;
@@ -331,7 +345,7 @@ class PPU{
             }
             case 3:{
                 let at_byte = this.at_fetch();
-                let at_shift = ((this.reg_v & 0x40) >> 5) | ((this.reg_v & 0x02) >> 1);
+                let at_shift = ((this.reg_v & 0x40) >>> 4) | (this.reg_v & 0x02);
                 this.at_latch |= ((at_byte >>> at_shift) & 0x03) << 2;
                 break;
             }
@@ -364,21 +378,20 @@ class PPU{
         // we will be selecting according to fine X
         let cur_bit = 15 - this.fine_x;
         let bit_select = 1 << cur_bit;
-        if (this.pt_shift_low | this.pt_shift_high){
-            debug_log("non-zero pt shift regs");
-        }
         // Calculate color bits
         let col_bits = ((this.pt_shift_high & bit_select) >> (cur_bit - 1))
                      | ((this.pt_shift_low  & bit_select) >>  cur_bit     );
         // Calculate palette index
-        let pal_bits = this.at_latch & 0x03;
+        let pal_shift = (this.fine_x + ((this.dot - 1) % 8) < 8) ? 0 : 2;
+        let pal_bits = (this.at_latch >> pal_shift) & 0x03;
         // All transparent colors mirror to 0x3F00
         if (!col_bits) pal_bits = 0x00;
         // Put it all together
         let col_addr = 0x3F00 | (pal_bits << 2) | col_bits;
         let col_i    = this.nes.mmap.ppu_get_byte(col_addr) & 0x3F;
         this.put_pixel(this.dot - 1, this.scanline, this.palette[col_i]);
-    }   
+    }
+    
     // Used for executing all the visisble dots
     vis_dot(){
         // First dot is always idle in each scanline
@@ -410,7 +423,7 @@ class PPU{
                 this.set_status(PPU.OVERFLOW_POS , 0);
             }
         }
-        else if ((this.dot <= 257) && (this.dot <= 320)){
+        else if ((this.dot >= 257) && (this.dot <= 320)){
             // Don't do any of these things if rendering is disabled
             if (!(this.reg_mask & 0x18)) return;
             // Reset horizontal component of V to that of T
@@ -440,13 +453,15 @@ class PPU{
         }
         // These cycles are pretty weird, so just go with it
         else if ((this.dot >= 321) && (this.dot <= 336)){
-            this.fetch_tile_info();
             if ((this.dot == 328) || (this.dot == 336)){
-                if (this.reg_mask & 0x18) return;
+                if (!(this.reg_mask & 0x18)) return;
+                this.fetch_tile_info()
                 this.pt_shift_low  <<= 8;
                 this.pt_shift_high <<= 8;
                 this.coarse_x_inc();
+                return;
             }
+            this.fetch_tile_info();
         }
         // NT fetches for cycles 337 - 340 (remember we emulate those 2 cycle
         // fetches by fetching on the first one then remaining idle)
@@ -455,7 +470,8 @@ class PPU{
             if (this.reg_mask & 0x18) this.nt_latch = this.nt_fetch();
         }
     }
-    
+
+    // Used for dot-accurate rendering
     exec_dot(){
         // Visible and pre-render scalines are handled here
         if ((this.scanline <= 239) || (this.scanline == 261)){
@@ -467,7 +483,7 @@ class PPU{
             // post-render line, after that, it's pure idle
             if ((this.scanline == 241) && (this.dot == 1)){
                 this.nes.count_frame();
-                this.update_out_buf();
+                this.cur_buf = !this.cur_buf;
                 this.set_status(PPU.VBLANK_POS, 1);
                 // Generate an NMI when entering V-Blank if flag is set
                 if (this.reg_ctrl & 0x80) this.nes.cpu.req_nmi = true;
@@ -478,7 +494,7 @@ class PPU{
         if (this.dot == 341){ // 341 dots per scanline (0 - 340)
             this.dot = 0;
             this.scanline++;
-            if (this.scanline == 262) this.scanline = 0; // (0 - 261)
+            if (this.scanline == 262) this.scanline = 0; // 262 scanlines per frame (0 - 261)
             this.odd_frame = !this.odd_frame;
             // Skip dot 0 of scanline 0 on odd frames if rendering is enabled
             if (this.odd_frame && (this.reg_mask & 0x18)) this.dot = 1;
@@ -758,7 +774,7 @@ class PPU{
         // image buffer to the actual output buffer and keep the FPS metric
         // up to date
         else if (this.scanline == 240){
-            this.update_out_buf();
+            this.cur_buf = !this.cur_buf;
             this.nes.count_frame();
         }
         // Start of VBlank period

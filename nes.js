@@ -51,7 +51,7 @@ class NES{
         this.controller.bind_keys();
         this.controller.bind_buttons();
         this.mmap.load_rom(rom);
-        this.ppu.init_buffer();
+        this.ppu.init_buffers();
         this.ppu.load_normal_palette();
         this.cpu.reset();
     }
@@ -59,12 +59,18 @@ class NES{
     reset(){
         this.cpu.reset();
         this.ppu = new PPU(this);
-        this.ppu.init_buffer();
+        this.ppu.init_buffers();
         this.ppu.load_normal_palette();
     }
     
     update_screen(){
-        this.ctx.putImageData(new ImageData(this.ppu.out_buf, 256, 240), 0, 0);
+        this.ctx.putImageData(
+            // cur_buf indicates the buffer we are WRITING to, not the one which
+            // is finished, so we need to choose the opposite
+            new ImageData(this.ppu.cur_buf ? this.ppu.bk_buf : this.ppu.fr_buf, 256, 240)
+            , 0
+            , 0
+        );
     }
     
     // Not cycle accurate but close enough
@@ -90,9 +96,9 @@ class NES{
                 }
                 this.cpu_wait_cycles--;
             }
-            //if (this.ppu_wait_dots == 0) this.ppu_wait_dots += this.ppu.exec_dot_group();
-            //this.ppu_wait_dots--;
-            this.ppu.exec_dot();
+            if (this.ppu_wait_dots == 0) this.ppu_wait_dots += this.ppu.exec_dot_group();
+            this.ppu_wait_dots--;
+            //this.ppu.exec_dot();
         }
         this.update_screen();
         if ((now_ts - this.fps_update_ts) >= 1) this.update_fps(now_ts);
@@ -104,7 +110,7 @@ class NES{
     }
 
     update_fps(now){
-        let fps = Math.floor(this.frame_count / (now - this.fps_update_ts));
+        let fps = Math.round(this.frame_count / (now - this.fps_update_ts));
         this.fps_display.innerHTML = fps + " FPS";
         this.fps_update_ts = now;
         this.frame_count = 0;
