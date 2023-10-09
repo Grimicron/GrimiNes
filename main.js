@@ -1,6 +1,9 @@
 let rom_input    = null;
 let rom_button   = null;
 let reset_button = null;
+let save_button  = null;
+let load_button  = null;
+let load_input   = null;
 let canvas       = null;
 let ctx          = null;
 let fr           = null;
@@ -48,9 +51,11 @@ function frame(){
 function init_nes(rom){
     // Only activate overlay if the device has touch features
     if(window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
-    canvas.style.display = "block";
-    rom_button.style.display = "none";
-    reset_button.style.display = "block";
+    canvas.style.display        = "block";
+    reset_button.style.display  = "block";
+    save_button.style.display   = "block";
+    load_button.style.display   = "block";
+    rom_button.style.display    = "none";
     document.querySelectorAll(".quick-rom-select").forEach((e) => { e.style.display = "none"; });
     my_nes.init(ctx, rom);
     window.requestAnimationFrame(frame);
@@ -80,6 +85,9 @@ document.addEventListener("DOMContentLoaded", () => {
     rom_input    = document.getElementById("rom-input");
     rom_button   = document.getElementById("rom-button");
     reset_button = document.getElementById("reset-button");
+    save_button  = document.getElementById("save-button");
+    load_button  = document.getElementById("load-button");
+    load_input   = document.getElementById("load-input");
     canvas       = document.getElementById("screen");
     ctx          = canvas.getContext("2d");
     fr           = new FileReader();
@@ -91,15 +99,27 @@ document.addEventListener("DOMContentLoaded", () => {
     try_uri_load();
     
     rom_input.onchange = () => {
-	   fr.readAsArrayBuffer(rom_input.files[0]);
-    };
-    fr.onloadend = (e) => {
-        init_nes(new Uint8Array(fr.result));
+	    fr.readAsArrayBuffer(rom_input.files[0]);
+        fr.onloadend = (e) => {
+            init_nes(new Uint8Array(fr.result));
+        };
     };
     rom_button.onclick = () => {
         rom_input.click();
     };
     reset_button.onclick = () => {
         my_nes.reset();
+    };
+    save_button.onclick = () => {
+        download("grimines_save.state", [JSON.stringify(my_nes.to_json())]);
+    };
+    load_button.onclick = () => {
+        load_input.click();
+    };
+    load_input.onchange = () => {
+        fr.readAsText(load_input.files[0]);
+        fr.onloadend = (e) => {
+            my_nes.from_json(JSON.parse(fr.result));
+        };
     };
 });

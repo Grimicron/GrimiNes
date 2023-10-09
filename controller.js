@@ -1,11 +1,11 @@
 class CONTROLLER{
-    constructor(p_nes, p_keybinds, p_gpbinds, p_bt_class){
+    constructor(p_nes, p_kb_binds, p_gpbinds, p_bt_class){
         this.nes          = p_nes;
         // p_keybinds is an object which has 8 properties:
         // a, b, select, start, up, down, left, right
         // Each of these properties has a key assigned to it
         // identifying the key which is bound to its respective button
-        this.keybinds     = p_keybinds;
+        this.kb_binds     = p_kb_binds;
         // Controller API properties
         this.gp_connected = false;
         this.gp_binds     = p_gpbinds;
@@ -29,31 +29,54 @@ class CONTROLLER{
         this.strobe_bit   = 0x00;
     }
 
+    to_json(){
+        return {
+            // It might be useful to keep the binds
+            // in our saves, since they might custom binds
+            // set by the user
+            kb_binds:   this.kb_binds,
+            gp_binds:   this.gp_binds,
+            bt_class:   this.bt_class,
+            state:      this.state,
+            read_index: this.read_index,
+            strobe_bit: this.strobe_bit,
+        };
+    }
+
+    from_json(state){
+        this.kb_binds   = state.kb_binds;
+        this.gp_binds   = state.gp_binds;
+        this.bt_class   = state.bt_class;
+        this.state      = state.state;
+        this.read_index = state.read_index;
+        this.strobe_bit = state.strobe_bit;
+    }
+
     // This function simply halfs the code size, not much else to it
     kb_handle_change(key, pressed){
         switch (key){
-            case this.keybinds.a:
+            case this.kb_binds.a:
                 this.kb_state[0] = pressed;
                 break;
-            case this.keybinds.b:
+            case this.kb_binds.b:
                 this.kb_state[1] = pressed;
                 break;
-            case this.keybinds.select:
+            case this.kb_binds.select:
                 this.kb_state[2] = pressed;
                 break;
-            case this.keybinds.start:
+            case this.kb_binds.start:
                 this.kb_state[3] = pressed;
                 break;
-            case this.keybinds.up:
+            case this.kb_binds.up:
                 this.kb_state[4] = pressed;
                 break;
-            case this.keybinds.down:
+            case this.kb_binds.down:
                 this.kb_state[5] = pressed;
                 break;
-            case this.keybinds.left:
+            case this.kb_binds.left:
                 this.kb_state[6] = pressed;
                 break;
-            case this.keybinds.right:
+            case this.kb_binds.right:
                 this.kb_state[7] = pressed;
                 break;
         }
@@ -91,13 +114,13 @@ class CONTROLLER{
     bind_keys(){
         document.addEventListener("keydown", (e) => {
             // Only cancel default and handle event if the key is in our keybinds
-            if (!Object.values(this.keybinds).includes(e.code)) return;
+            if (!Object.values(this.kb_binds).includes(e.code)) return;
             if (e.cancelable) e.preventDefault();
             this.kb_handle_change(e.code, 0x01);
         });
         document.addEventListener("keyup",   (e) => {
             // Same as before
-            if (!Object.values(this.keybinds).includes(e.code)) return;
+            if (!Object.values(this.kb_binds).includes(e.code)) return;
             if (e.cancelable) e.preventDefault();
             this.kb_handle_change(e.code, 0x00);
         });

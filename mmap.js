@@ -17,6 +17,20 @@ class MMAP{
         this.mapper            = null;
     }
 
+    to_json(){
+        return {
+            // We don't need to save any ROM data, only RAM,
+            // since the ROM should already be loaded in
+            ppu_open_bus: this.ppu_open_bus,
+            mapper      : this.mapper.to_json(),
+        };
+    }
+
+    from_json(state){
+        this.ppu_open_bus = state.ppu_open_bus;
+        this.mapper.from_json(state.mapper);
+    }
+    
     load_rom_flags(rom){
         for (let i = 0; i < 0x10; i++) this.rom_flags[i] = rom[i];
     }

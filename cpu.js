@@ -57,6 +57,30 @@ class CPU{
         this.req_nmi     = false;
     }
 
+    to_json(){
+        return {
+            acc        : this.acc,
+            x_reg      : this.x_reg,
+            y_reg      : this.y_reg,
+            proc_status: this.proc_status,
+            stack_ptr  : this.stack_ptr,
+            prg_counter: this.prg_counter,
+            req_irq    : this.req_irq,
+            req_nmi    : this.req_nmi,
+        }
+    }
+
+    from_json(state){
+        this.acc         = state.acc;
+        this.x_reg       = state.x_reg;
+        this.y_reg       = state.y_reg;
+        this.proc_status = state.proc_status;
+        this.stack_ptr   = state.stack_ptr;
+        this.prg_counter = state.prg_counter;
+        this.req_irq     = state.req_irq;
+        this.req_nmi     = state.req_nmi;
+    }
+
     reset(){
         // Load reset/power-on vector into PC
         this.prg_counter = (this.nes.mmap.get_byte(0xFFFD) << 8) | this.nes.mmap.get_byte(0xFFFC);

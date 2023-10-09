@@ -6,6 +6,7 @@ class NES{
     constructor(){
         this.cpu        = new CPU       (this);
         this.ppu        = new PPU       (this);
+        this.apu        = new APU       (this);
         this.mmap       = new MMAP      (this);
         this.logger     = new LOGGER    (this);
         this.controller = new CONTROLLER(this, {
@@ -56,7 +57,38 @@ class NES{
         this.cpu.reset();
     }
 
+    to_json(){
+        // Returns the current state of the NES for the purpose
+        // of stringify-ing and saving
+        // Doesn't contain the ROM data or current image buffer data
+        // both because it's too big and because it should already be
+        // loadedd in/will load in very soon
+        return {
+            version   : 1,
+            cpu       : this.cpu.to_json(),
+            ppu       : this.ppu.to_json(),
+            apu       : this.apu.to_json(),
+            mmap      : this.mmap.to_json(),
+            controller: this.controller.to_json(),
+        };
+    }
+
+    from_json(state){
+        // State should be the actual JSON object returned by
+        // parsing the save state
+        // .from_json() for every component of the NES is a 
+        // function which modifies and initializes all the
+        // internal variables to that of the data kept in the JSON,
+        // it doesn't return a new CPU or whatever it may be
+        this.cpu.from_json(state.cpu);
+        this.ppu.from_json(state.ppu);
+        this.apu.from_json(state.apu);
+        this.mmap.from_json(state.mmap);
+        this.controller.from_json(state.controller);
+    }
+
     reset(){
+        // Isn't exactly a true reset but is good enough
         this.cpu.reset();
         this.ppu = new PPU(this);
         this.ppu.init_buffers();

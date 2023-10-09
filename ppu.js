@@ -83,6 +83,67 @@ class PPU{
         this.fr_buf        = new Uint8ClampedArray(256 * 240 * 4);
     }
 
+    to_json(){
+        return {
+            reg_ctrl     : this.reg_ctrl,
+            reg_mask     : this.reg_mask,
+            reg_status   : this.reg_status,
+            oam_addr     : this.reg_oamaddr,
+            reg_t        : this.reg_t,
+            reg_v        : this.reg_v,
+            fine_x       : this.fine_x,
+            latch_w      : this.latch_w,
+            read_buffer  : this.read_buffer,
+            oam          : Array.from(this.oam),
+            sec_oam      : Array.from(this.sec_oam),
+            scanline     : this.scanline,
+            dot          : this.dot,
+            odd_frame    : this.odd_frame,
+            nt_latch     : this.nt_latch,
+            at_latch     : this.at_latch,
+            pt_shift_low : this.pt_shift_low,
+            pt_shift_high: this.pt_shift_high,
+            pt_latch_low : this.pt_latch_low,
+            pt_latch_high: this.pt_latch_high,
+            palette      : this.palette,
+            prev_spr_buf : { buf: Array.from(this.prev_spr_buf.buf), sprz: Array.from(this.prev_spr_buf.sprz) },
+            cur_buf      : this.cur_buf,
+            // We don't really need to save the image buffers
+            // since they are very big and without them all that
+            // is affected is that one frame will be transparent (a.k.a
+            // the image would start to show up 1 frame slower than normal)
+        };
+    }
+
+    from_json(state){
+        this.reg_ctrl          = state.reg_ctrl;
+        this.reg_mask          = state.reg_mask;
+        this.reg_status        = state.reg_status;
+        this.oam_addr          = state.oam_addr;
+        this.reg_t             = state.reg_t;
+        this.reg_v             = state.reg_v;
+        this.fine_x            = state.fine_x;
+        this.latch_w           = state.latch_w;
+        this.read_buffer       = state.read_buffer;
+        // The Uint8Arrays are kind of harder to load in
+        // than the normal properties
+        this.oam               = new Uint8Array(state.oam);
+        this.sec_oam           = new Uint8Array(state.sec_oam);
+        this.scanline          = state.scanline;
+        this.dot               = state.dot;
+        this.odd_frame         = state.odd_frame;
+        this.nt_latch          = state.nt_latch;
+        this.at_latch          = state.at_latch;
+        this.pt_shift_low      = state.pt_shift_low;
+        this.pt_shift_high     = state.pt_shift_high;
+        this.pt_latch_low      = state.pt_latch_low;
+        this.pt_latch_high     = state.pt_latch_high;
+        this.palette           = state.palette;
+        this.prev_spr_buf.buf  = new Uint8Array(state.prev_spr_buf.buf);
+        this.prev_spr_buf.sprz = new Uint8Array(state.prev_spr_buf.sprz);
+        this.cur_buf           = state.cur_buf;
+    }
+    
     set_status(pos, val){
         // Explanation of why this works in cpu.js set_flag()
         let flag_bit = (!!val) << pos;
@@ -545,6 +606,12 @@ class PPU{
         // C = Palette color
         let buffer      = new Uint8Array(256);
         let sprz_pixels = new Uint8Array(256);
+        for (let i = 0; i < 256; i++){
+            // Initialize the sprite buffer to all black
+            // This is necessary because the loop to render all the sprites
+            // in the secondary OAM might not touch and initialize every pixel
+            buffer[i] = 0x0F;
+        }
         // Base pattern table address
         let base_pt   = (this.reg_ctrl & 0x08) << 9;
         // Making i increase by 4 saves so many multiplications
@@ -573,6 +640,8 @@ class PPU{
             // Saves a handful of operations and makes the code more readable
             let hor_flip   =  this.sec_oam[i+2] & 0x40;
             for (let j = 0; j < 8; j++){
+                // Stop rendering sprite once we are out of the screen
+                if ((this.sec_oam[i+3]+j) > 0xFF) break;
                 // Current bit of high and low plane we are reading
                 // Also here we handle the horizontal flip logic
                 let cur_bit = 1 << (hor_flip ? j : (7 - j));
@@ -686,9 +755,13 @@ class PPU{
         // | 1-3 | 1-3 |    1     | BG  |
         // +-----+-----+----------+-----+
         let mux_buf        = new Uint8Array(256);
+        // If rendering is completely disabled, fill the mux buffer with black
+        if (!(this.reg_mask & 0x18)){
+            for (let i = 0; i < 256; i++) mux_buf[i] = 0x0F;
+        }
         // If either BG or sprites are masked, we fill the
         // mux buffer with the other one
-        if      (!(this.reg_mask & 0x08)) mux_buf = this.prev_spr_buf.buf;
+        else if (!(this.reg_mask & 0x08)) mux_buf = this.prev_spr_buf.buf;
         else if (!(this.reg_mask & 0x10)) mux_buf = bg_buf;
         // Otherwise we apply the mux priority table
         else{

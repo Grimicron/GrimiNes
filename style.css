@@ -34,7 +34,7 @@ div{
     height: min(100vh, 93.75vw);
 }
 
-#rom-input{
+input{
     display: none;
 }
 
@@ -50,12 +50,17 @@ button{
     font-size: 1.3em;
 }
 
-#reset-button{
+#actions-container{
     position: absolute;
     top: 5px;
     right: 5px;
+    display: flex;
+    flex-direction: column;
+    z-index: 1;
+}
+
+#actions-container > button{
     display: none;
-    z-index: 99;
 }
 
 p{

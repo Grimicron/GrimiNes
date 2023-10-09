@@ -13,6 +13,36 @@ class NROM{ // iNES Mapper #000
         this.debug_out      = new Uint8Array(0x1000);
     }
 
+    to_json(){
+        let base = {
+            cpu_ram    : Array.from(this.cpu_ram),
+            ppu_vram   : Array.from(this.ppu_vram),
+            ppu_pal_ram: Array.from(this.ppu_pal_ram),
+            // We don't need to save any of the ROM
+            // data, since that should already be loaded
+            // in, nor the debug_out data, since the save
+            // feature is meant for users playing games which
+            // require multiple sessiosn to beat/enjoy, debuggind
+            // and reading the output of a test ROM should be swift
+        };
+        if (this.mmap.rom_flags[5] == 0){
+            base.chr_rom = Array.from(this.chr_rom);
+        }
+        return base;
+    }
+
+    from_json(state){
+        // Loading in our Uint8Arrays is quite hard, since JSON
+        // parses them as objects instead of arrays, but it's just
+        // a couple of extra steps
+        this.cpu_ram     = new Uint8Array(state.cpu_ram);
+        this.ppu_vram    = new Uint8Array(state.ppu_vram);
+        this.ppu_pal_ram = new Uint8Array(state.ppu_pal_ram);
+        if (this.mmap.rom_flags[5] == 0){
+            this.chr_rom = new Uint8Array(state.chr_rom);
+        }
+    }
+    
     load_prg_rom(rom){
         if (this.mmap.rom_flags[4] == 1){
             this.prg_rom = new Uint8Array(0x4000);
@@ -150,6 +180,27 @@ class MMC1 extends NROM{ // iNes Mapper #001
         this.chr_high_bank = 0x00;
         // Selects a 16/32KB PRG ROM bank
         this.prg_rom_bank = 0x00;
+    }
+
+    to_json(){
+        let base = super.to_json();
+        base.prg_ram       = Array.from(this.prg_ram);
+        base.shift_reg     = this.shift_reg;
+        base.ctrl_reg      = this.ctrl_reg;
+        base.chr_low_bank  = this.chr_low_bank;
+        base.chr_high_bank = this.chr_high_bank;
+        base.prg_rom_bank  = this.prg_rom_bank;
+        return base;
+    }
+
+    from_json(state){
+        super.from_json(state);
+        this.prg_ram       = new Uint8Array(state.prg_ram);
+        this.shift_reg     = state.shift_reg;
+        this.ctrl_reg      = state.ctrl_reg;
+        this.chr_low_bank  = state.chr_low_bank;
+        this.chr_high_bank = state.chr_high_bank;
+        this.prg_rom_bank  = state.prg_rom_bank;
     }
     
     load_prg_rom(rom){
@@ -347,6 +398,17 @@ class UXROM extends NROM{ // iNes Mapper #002
         this.prg_rom_bank = 0x00;
     }
 
+    to_json(){
+        let base = super.to_json();
+        base.prg_rom_bank = this.prg_rom_bank;
+        return base;
+    }
+
+    from_json(state){
+        super.from_json(state);
+        this.prg_rom_bank = state.prg_rom_bank;
+    }
+    
     load_prg_rom(rom){
         this.prg_rom = new Uint8Array(this.mmap.rom_flags[4] * 0x4000);
         for (let i = 0x0000; i < this.prg_rom.length; i++){
@@ -381,6 +443,17 @@ class CNROM extends NROM{ // iNES Mapper #003
         this.chr_bank = 0x00;
     }
 
+    to_json(){
+        let base = super.to_json();
+        base.chr_bank = this.chr_bank;
+        return base;
+    }
+
+    from_json(state){
+        super.from_json(state);
+        this.chr_bank = state.chr_bank;
+    }
+    
     load_chr_rom(rom){
         this.chr_rom = new Uint8Array(0x10000);
         for (let i = 0x0000; i < (this.mmap.rom_flags[5]*0x2000); i++){
@@ -408,6 +481,19 @@ class AXROM extends NROM{ // iNES Mapper #007
         this.mirror_screen = 0x0000;
     }
 
+    to_json(){
+        let base = super.to_json();
+        base.prg_rom_bank  = this.prg_rom_bank;
+        base.mirror_screen = this.mirror_screen;
+        return base;
+    }
+
+    from_json(state){
+        super.from_json(state);
+        this.prg_rom_bank  = state.prg_rom_bank;
+        this.mirror_screen = state.mirror_screen;
+    }
+    
     load_prg_rom(rom){
         this.prg_rom = new Uint8Array(0x40000);
         for (let i = 0x0000; i < this.prg_rom.length; i++){
