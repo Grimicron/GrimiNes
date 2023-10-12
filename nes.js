@@ -182,7 +182,7 @@ class NES{
             this.ppu_cycles -= NES.PPU_CYC_PER_MASTER;
             this.apu_cycles -= NES.APU_CYC_PER_MASTER;
         }
-        this.ctx.clearRect(0, 0, 256, 240);
+        this.update_screen();
         // Play audio buffer only if it has been renewed (should only come into play
         // on REALLY slow devices)
         if (this.apu.req_play) this.apu.play_buffer();
