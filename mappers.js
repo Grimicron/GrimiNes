@@ -25,6 +25,7 @@ class NROM{ // iNES Mapper #000
             // require multiple sessiosn to beat/enjoy, debuggind
             // and reading the output of a test ROM should be swift
         };
+        // If cartdrige uses CHR RAM, we should save that too
         if (this.mmap.rom_flags[5] == 0){
             base.chr_rom = Array.from(this.chr_rom);
         }
@@ -211,6 +212,12 @@ class MMC1 extends NROM{ // iNes Mapper #001
     }
     
     load_chr_rom(rom){
+        if (this.mmap.rom_flags[5] == 0){
+            // Cartdriges that use CHR RAM always use an 8KB
+            // region for it, since there's no point in bank-switching RAM
+            this.chr_rom = new Uint8Array(0x2000);
+            return;
+        }
         this.chr_rom = new Uint8Array(0x20000);
         for (let i = 0x0000; i < (this.mmap.rom_flags[5]*0x2000); i++){
             this.chr_rom[i] = rom[0x0010 + (this.mmap.rom_flags[4]*0x4000) + i];
@@ -477,7 +484,7 @@ class CNROM extends NROM{ // iNES Mapper #003
 class AXROM extends NROM{ // iNES Mapper #007
     constructor(mmap){
         super(mmap);
-        this.prg_rom_bank = 0x00;
+        this.prg_rom_bank  = 0x00;
         this.mirror_screen = 0x0000;
     }
 

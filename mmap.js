@@ -143,10 +143,38 @@ class MMAP{
                 this.ppu_open_bus = val;
                 return;
             }
+            case 0x4008:{
+                this.nes.apu.set_tri_linear(val);
+                return;
+            }
+            case 0x400A:{
+                this.nes.apu.set_tri_timer(val);
+                return;
+            }
+            case 0x400B:{
+                this.nes.apu.set_tri_length(val);
+                return;
+            }
+            case 0x400C:{
+                this.nes.apu.set_noise_ctrl(val);
+                return;
+            }
+            case 0x400E:{
+                this.nes.apu.set_noise_period(val);
+                return;
+            }
+            case 0x400F:{
+                this.nes.apu.set_noise_length(val);
+                return;
+            }
             case 0x4014:{
                 // Again, this port is on the CPU, not the PPU,
                 // so we don't set the PPU open bus here
                 this.nes.ppu.oam_dma(val);
+                return;
+            }
+            case 0x4015:{
+                this.nes.apu.set_ctrl(val);
                 return;
             }
             case 0x4016:{

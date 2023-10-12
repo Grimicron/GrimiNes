@@ -306,7 +306,10 @@ class PPU{
             this.fr_buf[i + 3] = 0xFF;
         }
     }
-    
+
+    // No longer used because it affects performance a lot
+    // adding so many calls to the stack, but we can keep it
+    // here for good measure
     put_pixel(x, y, c){
         let i = ((y << 8) + x) * 4;
         // Choose between our buffers depending on cur_buf
@@ -532,7 +535,8 @@ class PPU{
         }
     }
 
-    // Used for dot-accurate rendering
+    // Used for dot-accurate rendering, but I don't think I'll be
+    // working on this system much more, as it's so much more performance-heavy
     exec_dot(){
         // Visible and pre-render scalines are handled here
         if ((this.scanline <= 239) || (this.scanline == 261)){
@@ -563,8 +567,6 @@ class PPU{
     }
 
     // Scanline accurate instead of dot accurate methods for better performance
-    // I won't be touching this code since I know it works, so consider it legacy
-    // code, I guess
     spr_in_scanline(y, spr_size){
         return (y <= this.scanline) && (y >= Math.max(this.scanline - spr_size + 1, 0));
     }
@@ -825,7 +827,19 @@ class PPU{
                     raw_c[2] = Math.min(raw_c[2] * PPU.EMPH_FACT, 0xFF);
                 }
             }
-            this.put_pixel(i, this.scanline, raw_c);
+            // We don't do this in a separate function call
+            // because it's pretty performance heavy
+            let buf_pos = (this.scanline * 256 + i) * 4;
+            if (this.cur_buf){
+                this.fr_buf[buf_pos  ] = raw_c[0];
+                this.fr_buf[buf_pos+1] = raw_c[1];
+                this.fr_buf[buf_pos+2] = raw_c[2];
+            }
+            else{
+                this.bk_buf[buf_pos  ] = raw_c[0];
+                this.bk_buf[buf_pos+1] = raw_c[1];
+                this.bk_buf[buf_pos+2] = raw_c[2];
+            }
         }
         if (this.reg_mask & 0x18){    
             // These 2 lines are verbose what happens after the scanline

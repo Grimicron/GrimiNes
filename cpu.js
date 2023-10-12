@@ -867,8 +867,6 @@ class CPU{
             return this.irq();
         }
         let opcode = this.nes.mmap.get_byte(this.prg_counter);
-        // See utils.js as to why we send those two extra arguments
-        debug_log(hx_fmt(this.prg_counter, true, true) + ": " + hx_fmt(opcode, false, true));
         // Check for all the single byte instructions since they don't really
         // fit any pattern
         // All instructions perform a dummy fetch to PC+1, regardless of if

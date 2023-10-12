@@ -50,7 +50,7 @@ function frame(){
 
 function init_nes(rom){
     // Only activate overlay if the device has touch features
-    if(window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
+    if (window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
     canvas.style.display        = "block";
     reset_button.style.display  = "block";
     save_button.style.display   = "block";
@@ -109,6 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     reset_button.onclick = () => {
         my_nes.reset();
+        dump_pattern_tables(0x0000);
     };
     save_button.onclick = () => {
         download("grimines_save.state", [JSON.stringify(my_nes.to_json())]);
