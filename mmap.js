@@ -93,6 +93,9 @@ class MMAP{
                 // open bus here
                 return 0x00;
             }
+            case 0x4015:{
+                return this.nes.apu.get_status();
+            }
             case 0x4016:{
                 return this.nes.controller.get_status();
             }
@@ -143,6 +146,38 @@ class MMAP{
                 this.ppu_open_bus = val;
                 return;
             }
+            case 0x4000:{
+                this.nes.apu.set_sq1_ctrl(val);
+                return;
+            }
+            case 0x4001:{
+                this.nes.apu.set_sq1_sweep(val);
+                return;
+            }
+            case 0x4002:{
+                this.nes.apu.set_sq1_timer(val);
+                return;
+            }
+            case 0x4003:{
+                this.nes.apu.set_sq1_length(val);
+                return;
+            }
+            case 0x4004:{
+                this.nes.apu.set_sq2_ctrl(val);
+                return;
+            }
+            case 0x4005:{
+                this.nes.apu.set_sq2_sweep(val);
+                return;
+            }
+            case 0x4006:{
+                this.nes.apu.set_sq2_timer(val);
+                return;
+            }
+            case 0x4007:{
+                this.nes.apu.set_sq2_length(val);
+                return;
+            }
             case 0x4008:{
                 this.nes.apu.set_tri_linear(val);
                 return;
@@ -165,6 +200,22 @@ class MMAP{
             }
             case 0x400F:{
                 this.nes.apu.set_noise_length(val);
+                return;
+            }
+            case 0x4010:{
+                this.nes.apu.set_dmc_ctrl(val);
+                return;
+            }
+            case 0x4011:{
+                this.nes.apu.set_dmc_level(val);
+                return;
+            }
+            case 0x4012:{
+                this.nes.apu.set_dmc_addr(val);
+                return;
+            }
+            case 0x4013:{
+                this.nes.apu.set_dmc_length(val);
                 return;
             }
             case 0x4014:{

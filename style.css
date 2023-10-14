@@ -27,6 +27,7 @@ div{
 
 #screen{
     image-rendering: crisp-edges;
+    image-rendering: pixelated;
     display: none;
     margin: 0%;
     padding: 0%;
