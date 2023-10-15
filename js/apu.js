@@ -26,6 +26,7 @@ class APU{
           6,
         160,
           8,
+         60,
          10,
          14,
          12,
@@ -35,7 +36,7 @@ class APU{
          16,
          24,
          18,
-         58,
+         48,
          20,
          96,
          22,
@@ -401,7 +402,7 @@ class APU{
         // and another afterwards at 440Hz, which just effectively results
         // in a 440Hz highpass filter (I think)
         this.high_pass.frequency.value = 440;
-        this.ctx.audioWorklet.addModule("apu.js").then(() => {
+        this.ctx.audioWorklet.addModule("js/apu.js").then(() => {
             // Set up the pipeline once the promise of adding the module has been completed
             this.fader = new AudioWorkletNode(this.ctx, "AudioFader");
             this.fader.connect(this.low_pass);

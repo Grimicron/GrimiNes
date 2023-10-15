@@ -49,6 +49,9 @@ function frame(){
 }
 
 function init_nes(rom){
+    // Hide overflow to make game as visible at all times as possible and
+    // to prevent the user form accidentally scrolling away just in case
+    document.body.style.overflow = "hidden";
     // Only activate overlay if the device has touch features
     if (window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
     canvas.style.display        = "block";
@@ -56,9 +59,12 @@ function init_nes(rom){
     save_button.style.display   = "block";
     load_button.style.display   = "block";
     rom_button.style.display    = "none";
-    document.querySelectorAll(".quick-rom-select").forEach((e) => { e.style.display = "none"; });
+    document.getElementById("quick-rom-select-container").style.display = "none";
+    document.getElementById("main-title").style.display = "none";
     my_nes.init(ctx, rom);
     window.requestAnimationFrame(frame);
+    // Undo transparency transition
+    document.getElementById("game-container").classList.toggle("transitioning");
 }
 
 function quick_load(name){
@@ -68,7 +74,11 @@ function quick_load(name){
     req.overrideMimeType("text/plain");
     req.onload = () => {
         if (req.status != 200) return;
-        init_nes(new Uint8Array(req.response));
+        // Transparency transition which takes .5 seconds
+        document.getElementById("game-container").classList.toggle("transitioning");
+        setTimeout(() => {
+            init_nes(new Uint8Array(req.response));
+        }, 500);
     };
     req.send();
 }
@@ -78,6 +88,23 @@ function try_uri_load(){
     if (!rom_name) return;
     if (!rom_name.endsWith(".nes")) rom_name += ".nes";
     quick_load(rom_name);
+}
+
+// Injects the ROM icons and hooks up the on click
+// event listener for each ROM in the quick select menu
+function inject_rom_list_info(){
+    // We can basically reuse the same element for each ROM
+    let icon = document.createElement("img");
+    // Show nothing if icon doesn't exist
+    icon.alt = "";
+    document.querySelectorAll("#quick-rom-select-container li").forEach((e) => {
+        e.addEventListener("click", () => {
+            quick_load(e.getAttribute("rom") + ".nes");
+        });
+        icon.src = "img/icons/" + e.getAttribute("rom") + ".png";
+        e.prepend(icon.cloneNode(true));
+        e.append(icon.cloneNode(true));
+    });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -92,16 +119,23 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx          = canvas.getContext("2d");
     fr           = new FileReader();
     my_nes       = new NES();
-    
     ctx.imageSmoothingEnabled = false;
     ctx.mozImageSmoothingEnabled = false;
 
     try_uri_load();
-    
+    inject_rom_list_info();
+    // Wait a tiny bit to show the content to make sure everything
+    // is pretty much loaded
+    setTimeout(() => {
+        document.getElementById("game-container").classList.toggle("transitioning");
+    }, 500);
     rom_input.onchange = () => {
 	    fr.readAsArrayBuffer(rom_input.files[0]);
         fr.onloadend = (e) => {
-            init_nes(new Uint8Array(fr.result));
+            document.getElementById("game-container").classList.toggle("transitioning");
+            setTimeout(() => {
+                init_nes(new Uint8Array(fr.result));
+            }, 500);
         };
     };
     rom_button.onclick = () => {

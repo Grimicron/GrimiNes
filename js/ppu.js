@@ -863,6 +863,10 @@ class PPU{
         else if (this.scanline == 240){
             this.cur_buf = !this.cur_buf;
             this.nes.count_frame();
+            // This is as good a time as any to empty out our
+            // saved sprite buffer, since there's no next scanline
+            // to use it in
+            this.prev_spr_buf = { buf: new Uint8Array(256), sprz: new Uint8Array(256) };
         }
         // Start of VBlank period
         else if (this.scanline == 241){

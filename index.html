@@ -6,48 +6,53 @@
 		<link rel="stylesheet" href="style.css"/>
 	</head>
 	<body>
-        <div id="game-container">
+        <div id="game-container" class="transitioning">
+            <h1 id="main-title">GRIMINES</h1>
 		    <input id="rom-input" type="file" name="rom-input"/>
-            <button id="rom-button">Select ROM</button>
-            <p class="quick-rom-select" onclick="quick_load('arkanoid.nes')"   >Arkanoid</p>
-            <p class="quick-rom-select" onclick="quick_load('castlevania.nes')">Castlevania</p>
-            <p class="quick-rom-select" onclick="quick_load('commando.nes')"   >Commando</p>
-            <p class="quick-rom-select" onclick="quick_load('contra.nes')"     >Contra</p>
-            <p class="quick-rom-select" onclick="quick_load('donkeykong.nes')" >Donkey Kong</p>
-            <p class="quick-rom-select" onclick="quick_load('galaga.nes')"     >Galaga</p>
-            <p class="quick-rom-select" onclick="quick_load('iceclimber.nes')" >Ice Climber</p>
-            <p class="quick-rom-select" onclick="quick_load('megaman.nes')"    >Mega Man</p>
-            <p class="quick-rom-select" onclick="quick_load('smb.nes')"        >Super Mario Bros.</p>
-            <p class="quick-rom-select" onclick="quick_load('zelda.nes')"      >The Legend of Zelda</p>
-            <p class="quick-rom-select" onclick="quick_load('zeldaii.nes')"    >Zelda II: The Adventure of Link</p>
+            <button id="rom-button">UPLOAD ROM</button>
+            <ul id="quick-rom-select-container">
+                <li rom="1942"       >1942</li>
+                <li rom="arkanoid"   >ARKANOID</li>
+                <li rom="castlevania">CASTLEVANIA</li>
+                <li rom="commando"   >COMMANDO</li>
+                <li rom="contra"     >CONTRA</li>
+                <li rom="donkeykong" >DONKEY KONG</li>
+                <li rom="galaga"     >GALAGA</li>
+                <li rom="iceclimber" >ICE CLIMBER</li>
+                <li rom="megaman"    >MEGA MAN</li>
+                <li rom="megamanii"  >MEGA MAN 2</li>
+                <li rom="smb"        >SUPER MARIO BROS.</li>
+                <li rom="zelda"      >THE LEGEND OF ZELDA</li>
+                <li rom="zeldaii"    >ZELDA II: THE ADVENTURE OF LINK</li>
+            </ul>
             <canvas id="screen" width="256" height="240"></canvas>
             <div id="actions-container">
-                <button id="save-button">Save</button>
-                <button id="load-button">Load</button>
-                <button id="reset-button">Reset</button>
+                <button id="save-button">SAVE</button>
+                <button id="load-button">LOAD</button>
+                <button id="reset-button">RESET</button>
                 <input id="load-input" type="file" name="load-input"/>
             </div>
         </div>
         <p id="fps-counter"></p>
         <div id="tactile-overlay">
-            <img class="tactile-button" id="bt-a"      src="./img/nes_controller_a.png"     />
-            <img class="tactile-button" id="bt-b"      src="./img/nes_controller_b.png"     />
-            <img class="tactile-button" id="bt-select" src="./img/nes_controller_select.png"/>
-            <img class="tactile-button" id="bt-start"  src="./img/nes_controller_start.png" />
-            <img class="tactile-button" id="bt-up"     src="./img/nes_controller_up.png"    />
-            <img class="tactile-button" id="bt-down"   src="./img/nes_controller_down.png"  />
-            <img class="tactile-button" id="bt-left"   src="./img/nes_controller_left.png"  />
-            <img class="tactile-button" id="bt-right"  src="./img/nes_controller_right.png" />
+            <img class="tactile-button" id="bt-a"      src="img/buttons/nes_controller_a.png"     />
+            <img class="tactile-button" id="bt-b"      src="img/buttons/nes_controller_b.png"     />
+            <img class="tactile-button" id="bt-select" src="img/buttons/nes_controller_select.png"/>
+            <img class="tactile-button" id="bt-start"  src="img/buttons/nes_controller_start.png" />
+            <img class="tactile-button" id="bt-up"     src="img/buttons/nes_controller_up.png"    />
+            <img class="tactile-button" id="bt-down"   src="img/buttons/nes_controller_down.png"  />
+            <img class="tactile-button" id="bt-left"   src="img/buttons/nes_controller_left.png"  />
+            <img class="tactile-button" id="bt-right"  src="img/buttons/nes_controller_right.png" />
         </div>
-        <script src="utils.js"     ></script>
-        <script src="logger.js"    ></script>
-        <script src="mappers.js"   ></script>
-        <script src="mmap.js"      ></script>
-        <script src="controller.js"></script>
-        <script src="apu.js"       ></script>
-        <script src="ppu.js"       ></script>
-		<script src="cpu.js"       ></script>
-        <script src="nes.js"       ></script>
-		<script src="main.js"      ></script>
+        <script src="js/utils.js"     ></script>
+        <script src="js/logger.js"    ></script>
+        <script src="js/mappers.js"   ></script>
+        <script src="js/mmap.js"      ></script>
+        <script src="js/controller.js"></script>
+        <script src="js/apu.js"       ></script>
+        <script src="js/ppu.js"       ></script>
+		<script src="js/cpu.js"       ></script>
+        <script src="js/nes.js"       ></script>
+		<script src="js/main.js"      ></script>
 	</body>
 </html>

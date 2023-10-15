@@ -3,7 +3,7 @@ html, body{
     width: 100%;
     margin: 0%;
     padding: 0%;
-    overflow: hidden;
+    overflow: scroll;
     background-color: #1c1c1c;
     user-select: none;
     -webkit-touch-callout: none;
@@ -15,7 +15,6 @@ div{
 }
 
 #game-container{
-    height: 100%;
     width: 100%;
     margin: 0%;
     padding: 0%;
@@ -23,6 +22,65 @@ div{
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    opacity: 1;
+    transition: opacity .5s ease-in-out;
+    &.transitioning{
+        transition: opacity .5s ease-in-out;
+        opacity: 0;
+    }
+}
+
+#main-title{
+    font-family: "NES";
+    color: #ffffff;
+    font-size: 10vw;
+}
+
+#quick-rom-select-container{
+    display: grid;
+    margin: 1em;
+    padding: 0px;
+    width: 75vw;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    grid-gap: 11px;
+    justify-content: center;
+    align-items: center;
+}
+
+#quick-rom-select-container li{
+    display: flex;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    background-color: #101010;
+    height: 100px;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.0em;
+    text-align: center;
+    margin: 0.25em;
+    padding: 0%;
+    text-decoration: none;
+    font-family: "NES";
+    color: #ffffff;
+    cursor: pointer;
+    transition: background-color .3s ease-in-out, transform .3s ease-in-out;
+    &:hover{
+        background-color: #0f98fd;
+        transform: scale(1.1);
+    }
+}
+
+#quick-rom-select-container li img{
+    justify-self: center;
+    align-self: center;
+    height: 50%;
+    margin: 5%;
+    padding: 0%;
+    object-fit: contain;
+}
+
+:nth-child(2 of #quick-rom-select-container li img){
+    transform: scaleX(-1);
 }
 
 #screen{
@@ -43,12 +101,18 @@ button{
     background-color: #ffffff;
     border: none;
     border-radius: 5px;
-    padding: 10px;
+    padding: 20px;
     margin: 5px;
     cursor: pointer;
     color: #1c1c1c;
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: "NES";
     font-size: 1.3em;
+}
+
+#rom-button{
+    padding: min(4vw, 20px);
+    margin: min(1vw, 5px);
+    font-size: min(4vw, 1.3m);
 }
 
 #actions-container{
@@ -61,29 +125,30 @@ button{
 }
 
 #actions-container > button{
+    font-size: 1em;
+    padding: 10px;
     display: none;
+}
+
+@font-face{
+    font-family: "NES";
+    src: url("nes.ttf");
 }
 
 p{
     color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: "NES";
     font-size: 1.3em;
 }
 
 #fps-counter{
+    font-size: 1em;
     position: absolute;
     top: 5px;
     left: 5px;
     margin: 0%;
     padding: 0%;
     z-index: 1;
-}
-
-.quick-rom-select{
-    margin: 0.25em;
-    padding: 0%;
-    text-decoration-line: underline;
-    cursor: pointer;
 }
 
 #tactile-overlay{
