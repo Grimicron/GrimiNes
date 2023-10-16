@@ -43,7 +43,8 @@ class NES{
             down:   13,
             left:   14,
             right:  15,
-        }, "tactile-button");
+        }, "tactile-overlay");
+        this.paused          = true;
         this.keep_logs       = false;
         this.prev_ts         = 0;
         this.fps_update_ts   = 0;
@@ -140,6 +141,7 @@ class NES{
     
     // Not cycle accurate but close enough
     emu_cycle_queue(){
+        if (this.paused) return;
         // / 1000 to convert ms to secs, because since all of the clock speeds are
         // in HZ (cycles / sec), it makes it kinda cleaner
         let now_ts = window.performance.now() / 1000;

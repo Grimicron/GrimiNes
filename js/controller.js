@@ -1,5 +1,5 @@
 class CONTROLLER{
-    constructor(p_nes, p_kb_binds, p_gpbinds, p_bt_class){
+    constructor(p_nes, p_kb_binds, p_gpbinds, p_bt_container){
         this.nes          = p_nes;
         // p_keybinds is an object which has 8 properties:
         // a, b, select, start, up, down, left, right
@@ -10,9 +10,9 @@ class CONTROLLER{
         this.gp_connected = false;
         this.gp_binds     = p_gpbinds;
         this.gp_index     = 0;
-        // Tactile buttons class (each button will has a property
+        // Tactile buttons container (each button will have a property
         // which describes which button they correspond to)
-        this.bt_class     = p_bt_class;
+        this.bt_container = p_bt_container;
         // An array with the state of the controller
         // since it was last updated
         // It's in the order laid out above
@@ -34,22 +34,22 @@ class CONTROLLER{
             // It might be useful to keep the binds
             // in our saves, since they might custom binds
             // set by the user
-            kb_binds:   this.kb_binds,
-            gp_binds:   this.gp_binds,
-            bt_class:   this.bt_class,
-            state:      this.state,
-            read_index: this.read_index,
-            strobe_bit: this.strobe_bit,
+            kb_binds:     this.kb_binds,
+            gp_binds:     this.gp_binds,
+            bt_container: this.bt_container,
+            state:        this.state,
+            read_index:   this.read_index,
+            strobe_bit:   this.strobe_bit,
         };
     }
 
     from_json(state){
-        this.kb_binds   = state.kb_binds;
-        this.gp_binds   = state.gp_binds;
-        this.bt_class   = state.bt_class;
-        this.state      = state.state;
-        this.read_index = state.read_index;
-        this.strobe_bit = state.strobe_bit;
+        this.kb_binds     = state.kb_binds;
+        this.gp_binds     = state.gp_binds;
+        this.bt_container = state.bt_container;
+        this.state        = state.state;
+        this.read_index   = state.read_index;
+        this.strobe_bit   = state.strobe_bit;
     }
 
     // This function simply halfs the code size, not much else to it
@@ -136,7 +136,7 @@ class CONTROLLER{
     };
 
     bind_buttons(){
-        Array.from(document.getElementsByClassName(this.bt_class)).forEach((bt) => {
+        document.getElementById(this.bt_container).childNodes.forEach((bt) => {
             bt.addEventListener("touchstart", (e) => {
                 this.bt_handle_change(bt.id.split("-")[1], 0x01);
                 // Stop unwanted selections/zooms

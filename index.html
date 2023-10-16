@@ -28,21 +28,23 @@
             <canvas id="screen" width="256" height="240"></canvas>
             <div id="actions-container">
                 <button id="save-button">SAVE</button>
+                <input id="load-input" type="file" name="load-input"/>
                 <button id="load-button">LOAD</button>
                 <button id="reset-button">RESET</button>
-                <input id="load-input" type="file" name="load-input"/>
+                <button id="quit-button">QUIT</button>
             </div>
         </div>
         <p id="fps-counter"></p>
         <div id="tactile-overlay">
-            <img class="tactile-button" id="bt-a"      src="img/buttons/nes_controller_a.png"     />
-            <img class="tactile-button" id="bt-b"      src="img/buttons/nes_controller_b.png"     />
-            <img class="tactile-button" id="bt-select" src="img/buttons/nes_controller_select.png"/>
-            <img class="tactile-button" id="bt-start"  src="img/buttons/nes_controller_start.png" />
-            <img class="tactile-button" id="bt-up"     src="img/buttons/nes_controller_up.png"    />
-            <img class="tactile-button" id="bt-down"   src="img/buttons/nes_controller_down.png"  />
-            <img class="tactile-button" id="bt-left"   src="img/buttons/nes_controller_left.png"  />
-            <img class="tactile-button" id="bt-right"  src="img/buttons/nes_controller_right.png" />
+            <img id="bt-a"      src="img/buttons/nes_controller_a.png"     />
+            <img id="bt-b"      src="img/buttons/nes_controller_b.png"     />
+            <img id="bt-select" src="img/buttons/nes_controller_select.png"/>
+            <img id="bt-start"  src="img/buttons/nes_controller_start.png" />
+            <img id="bt-up"     src="img/buttons/nes_controller_arrow.png"/>
+            <img id="bt-down"   src="img/buttons/nes_controller_arrow.png"/>
+            <img id="bt-left"   src="img/buttons/nes_controller_arrow.png"/>
+            <img id="bt-right"  src="img/buttons/nes_controller_arrow.png"/>
+            <img id="bt-pad"    src="img/buttons/nes_controller_pad.png"  />
         </div>
         <script src="js/utils.js"     ></script>
         <script src="js/logger.js"    ></script>

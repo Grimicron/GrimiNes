@@ -3,7 +3,7 @@ html, body{
     width: 100%;
     margin: 0%;
     padding: 0%;
-    overflow: scroll;
+    overflow-x: hidden;
     background-color: #1c1c1c;
     user-select: none;
     -webkit-touch-callout: none;
@@ -23,17 +23,24 @@ div{
     align-items: center;
     justify-content: center;
     opacity: 1;
-    transition: opacity .5s ease-in-out;
-    &.transitioning{
-        transition: opacity .5s ease-in-out;
-        opacity: 0;
-    }
+    filter: blur(0px);
+    transform: scale(1.0);
+    transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
+    overflow: scroll;
+}
+
+#game-container.transitioning{
+    transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
+    opacity: 0;
+    filter: blur(5px);
+    transform: scale(2.0);
+    overflow: hidden !important;
 }
 
 #main-title{
     font-family: "NES";
     color: #ffffff;
-    font-size: 10vw;
+    font-size: min(10vw, 5em);
 }
 
 #quick-rom-select-container{
@@ -64,10 +71,11 @@ div{
     color: #ffffff;
     cursor: pointer;
     transition: background-color .3s ease-in-out, transform .3s ease-in-out;
-    &:hover{
-        background-color: #0f98fd;
-        transform: scale(1.1);
-    }
+}
+
+#quick-rom-select-container li:hover{
+    background-color: #0f98fd;
+    transform: scale(1.1);
 }
 
 #quick-rom-select-container li img{
@@ -121,13 +129,13 @@ button{
     right: 5px;
     display: flex;
     flex-direction: column;
-    z-index: 1;
 }
 
 #actions-container > button{
     font-size: 1em;
     padding: 10px;
     display: none;
+    z-index: 2;
 }
 
 @font-face{
@@ -152,15 +160,36 @@ p{
 }
 
 #tactile-overlay{
-    display: none;
     position: absolute;
+    pointer-events: none;
     top: 0px;
     left: 0px;
     width: 100%;
     height: 100%;
+    z-index: 1;
+    opacity: 1;
+    filter: blur(8px);
+    transform: scale(2.0);
+    transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
 }
 
-.tactile-button{
+@media (hover:none){
+    #tactile-overlay.ingame{
+        opacity: 1;
+        filter: blur(0px);
+        transform: scale(1.0);
+        transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
+    }
+}
+
+@media (hover:hover){
+    #tactile-overlay.ingame{
+        display: none;
+    }
+}
+
+#tactile-overlay img{
+    pointer-events: auto;
     margin: 0%;
     padding: 0%;
     width: auto;
@@ -179,7 +208,7 @@ p{
 #bt-b{
     max-width: 13vw;
     max-height: 13vw;
-    right: calc(13vw + 7px);
+    right: calc(15vw + 5px);
     bottom: calc(10vw + 5px);
 }
 
@@ -198,29 +227,39 @@ p{
 }
 
 #bt-up{
-    max-width: 7vw;
-    max-height: 14vw;
-    left: calc(7vw + 5px);
-    bottom: calc(17vw + 12px);
-}
-
-#bt-down{
+    transform: rotate(90deg);
     max-width: 7vw;
     max-height: 7vw;
     left: calc(7vw + 5px);
-    bottom: calc(10vw + 10px);
+    bottom: calc(24vw + 12px);
+}
+
+#bt-down{
+    transform: rotate(270deg);
+    max-width: 7vw;
+    max-height: 7vw;
+    left: calc(7vw + 5px);
+    bottom: calc(10vw + 12px);
 }
 
 #bt-left{
     max-width: 7vw;
     max-height: 7vw;
     left: 5px;
-    bottom: calc(16vw + 12px);
+    bottom: calc(17vw + 12px);
 }
 
 #bt-right{
+    transform: rotate(180deg);
     max-width: 7vw;
     max-height: 7vw;
     left: calc(14vw + 5px);
-    bottom: calc(16vw + 15px);
+    bottom: calc(17vw + 12px);
+}
+
+#bt-pad{
+    max-width: 7vw;
+    max-height: 7vw;
+    left: calc(7vw + 5px);
+    bottom: calc(17vw + 12px);
 }

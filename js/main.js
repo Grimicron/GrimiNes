@@ -4,6 +4,7 @@ let reset_button = null;
 let save_button  = null;
 let load_button  = null;
 let load_input   = null;
+let quit_button  = null;
 let canvas       = null;
 let ctx          = null;
 let fr           = null;
@@ -51,20 +52,37 @@ function frame(){
 function init_nes(rom){
     // Hide overflow to make game as visible at all times as possible and
     // to prevent the user form accidentally scrolling away just in case
-    document.body.style.overflow = "hidden";
-    // Only activate overlay if the device has touch features
-    if (window.matchMedia("(pointer: coarse)").matches) bt_overlay.style.display = "block";
+    window.scrollTo(0, 0);
+    document.getElementById("game-container").style.overflow = "hidden";
     canvas.style.display        = "block";
     reset_button.style.display  = "block";
     save_button.style.display   = "block";
     load_button.style.display   = "block";
+    quit_button.style.display   = "block";
     rom_button.style.display    = "none";
     document.getElementById("quick-rom-select-container").style.display = "none";
     document.getElementById("main-title").style.display = "none";
     my_nes.init(ctx, rom);
+    my_nes.paused = false;
     window.requestAnimationFrame(frame);
     // Undo transparency transition
     document.getElementById("game-container").classList.toggle("transitioning");
+    bt_overlay.classList.add("ingame");
+}
+
+function deinit_nes(){
+    document.getElementById("game-container").style.overflow = "scroll";
+    canvas.style.display = "none";
+    reset_button.style.display = "none";
+    save_button.style.display = "none";
+    load_button.style.display = "none";
+    quit_button.style.display = "none";
+    rom_button.style.display = "block";
+    document.getElementById("quick-rom-select-container").style.display = "grid";
+    document.getElementById("main-title").style.display = "block";
+    my_nes = new NES();
+    document.getElementById("game-container").classList.toggle("transitioning");
+    bt_overlay.classList.remove("ingame");
 }
 
 function quick_load(name){
@@ -115,6 +133,7 @@ document.addEventListener("DOMContentLoaded", () => {
     save_button  = document.getElementById("save-button");
     load_button  = document.getElementById("load-button");
     load_input   = document.getElementById("load-input");
+    quit_button  = document.getElementById("quit-button");
     canvas       = document.getElementById("screen");
     ctx          = canvas.getContext("2d");
     fr           = new FileReader();
@@ -156,5 +175,14 @@ document.addEventListener("DOMContentLoaded", () => {
         fr.onloadend = (e) => {
             my_nes.from_json(JSON.parse(fr.result));
         };
+    };
+    quit_button.onclick = () => {
+        document.getElementById("game-container").classList.toggle("transitioning");
+        setTimeout(() => {
+            deinit_nes();
+        }, 500);
+    };
+    document.onclick = (e) => {
+        console.log(e.target);
     };
 });
