@@ -408,14 +408,32 @@ class APU{
             this.fader.connect(this.low_pass);
             this.low_pass.connect(this.high_pass);
             this.high_pass.connect(this.ctx.destination);
-            // Also set up the even listener of the window being focused/unfocused to notify
-            // our fader of them so that it can mute itself when we aren't focused
-            document.addEventListener("visibilitychange", () => {
-                this.fader.port.postMessage({ type: "focus_state", focused: document.visibilityState == "visible" });
-            });
+            let pause_handler = () => {
+                // Only taking into account if the document is focused can be pretty
+                // misleading, since someone using a side-by-side layout would get their
+                // game silenced for just cliking off for a second, so we also count the
+                // document as unpaused if it's visible
+                let active = (document.visibilityState == "visible") || document.hasFocus();
+                this.fader.port.postMessage({ type: "pause_state", paused: (!active)});
+                if (active) this.high_pass.connect(this.ctx.destination);
+            }
+            // Disconnect the pipeline from the speakers to effectively silence it
+            // when we are unfocused and inform the fader of it just in case it helps
+            // reduce popping
+            document.addEventListener("focus"           , () => { pause_handler(); });
+            document.addEventListener("blur"            , () => { pause_handler(); });
+            document.addEventListener("visibilitychange", () => { pause_handler(); });
         });
         // Audio pipeline:
         // put_sample ══> buffer ══> fader ══> low_pass ══> high_pass ══> ctx.destination
+    }
+
+    destroy_sound(){
+        // Make sure that everything is disconnected and closed
+        this.fader.disconnect();
+        this.low_pass.disconnect();
+        this.high_pass.disconnect();
+        this.ctx.close();
     }
 
     // All the setters are kinda bulky, but it is what it is
@@ -1017,19 +1035,8 @@ class APU{
 // AudioWorkletProcessor exists, however it automatically tries to declare this class
 // when the document is loaded, so we have to catch and ignore that error
 try{
-    // AudioFader logic diagram:
-    //  APU buffer stream ══> cached buffer ═══╗                                 window focused
-    //        ║                                ╠═══> buffer sample ═╗                   ║
-    //        ╠═════> buffer read cursor ══════╝          ║         ║                   ║
-    //        ║        ║                                  ║         ║                   ║
-    //        ║        ║          ╔═══════════════════════╝	        ╠═══> linear mixer ═╩═> audio pipeline
-    //        ║        ║          ║                                 ║
-    //        ║        ║          v                                 ║
-    //        ╠════════╬═> last sample registers ══════════╦════════╝
-    //        ║        ║                                   ║
-    //        ╚════════╩═> fade sample counter ════════════╝
-    //     on new buffer/loop
     class AudioFader extends AudioWorkletProcessor{
+        /*
         // Represents to how many samples starting from the beginning and end we should
         // fade in from the beginning with the last played audio sample as a reference,
         // used both when switching buffers and looping a buffer while waiting for the next one
@@ -1048,12 +1055,8 @@ try{
             // We don't really care about what arguments we receive in our
             // constructor, so we just give them to our super()
             super(...args);
-            // Since we can't read the state of the window from this scope, we
-            // need to rely on the APU telling us whenever the window has been
-            // focused/unfocused to implement the gate to mute audio whenever
-            // we are out of focus
             // We start off assuming we are focused
-            this.focused = true;
+            this.paused = false;
             // Start off with 0.0 as a default value
             this.last_sample         = 0.0;
             // The last sample we played before we entered the fade stage
@@ -1080,10 +1083,10 @@ try{
                     // buffer waiting loop
                     this.last_fade_sample = this.last_sample;
                 }
-                else if (e.data.type == "focus_state"){
+                else if (e.data.type == "pause_state"){
                     // Update our internal register based on the
                     // state we have been sent
-                    this.focused = e.data.focused;
+                    this.paused = e.data.paused;
                 }
             };
         }
@@ -1095,6 +1098,18 @@ try{
             if (!outputs)       return;
             if (!outputs[0])    return;
             if (!outputs[0][0]) return;
+            // If we have been paused, we keep the waveform level untouched
+            // by playing the last sample over and over
+            if (this.paused){
+                for (let i = 0; i < outputs.length; i++){
+                    for (let j = 0; j < outputs[i].length; j++){
+                        for (let k = 0; k < outputs[i][j].length; k++){
+                            outputs[i][j][k] = this.last_sample;
+                        }
+                    }
+                }
+                return;
+            }
             // We work with just a mono-channel buffer, so we need to set
             // the mixed output of the buffer to every channel of every
             // output node we are connected to, so we just assume that
@@ -1136,12 +1151,193 @@ try{
                 // The indexing is a little bit weird but it is what it is
                 for (let j = 0; j < outputs.length; j++){
                     for (let k = 0; k < outputs[j].length; k++){
-                        // Only let the mixed sample pass through to the pipeline
-                        // if the window is focused, otherwise send silence
-                        outputs[j][k][i] = this.focused ? sample_out : 0.0;
+                        outputs[j][k][i] = sample_out;
                     }
                 }
             }
+            return true;
+        }
+        */
+        // Represents the length (in samples) of the fade-in of new audio buffers
+        // that we receive from the APU
+        static FADE_SAMPLES      = 200;
+        // Represents the number of samples we keep replaying while we wait for new
+        // samples to arrive, since replaying the whole buffer would sound very choppy,
+        // unresponsive, and would increase audio popping
+        // Has to be at least equal to or bigger than FADE_SAMPLES to prevent any popping
+        static LOOP_KEEP_SAMPLES = 250;
+
+        constructor(...args){
+            super(...args);
+            // Start off our buffers with empty silence
+            // Stores the audio buffer we are currently playing, and is
+            // moved into the last_buf register once we are done playing it
+            // (it is smoothed out for looping before that)
+            this.cur_buf             = new Float32Array(APU.BUF_SIZE);
+            // Is always designed to be played in a loop without any audio pops
+            // and is also used to fade in the new buffers which come in
+            this.last_buf            = new Float32Array(APU.BUF_SIZE);
+            // Represents how far along in our current audio buffer we are, and
+            // isn't touched once we reach the end until we receive a new buffer
+            this.cur_buf_cursor      = 0;
+            // Represents what sample in the last buffer we are playing, and is
+            // always looping around, but a gate in our architecture stops it
+            // from actually adding the sample to the mixer
+            this.last_buf_cursor     = 0;
+            // Tracks how many more samples are left to fade in
+            this.fade_length_counter = 0;
+            // A simple register for an internal gate which stops new sound
+            // from exiting us if we are paused
+            this.paused              = false;
+            // Keeps the last sample we played to reduce audio popping when
+            // we stop outputting new audio once we are paused
+            this.last_sample         = 0.0;
+            // This is the only way we can communicate with our corresponding
+            // AudioNode, so whenever we receive a message, we process what information
+            // it is communicating to us and act accordingly
+            this.port.onmessage = (e) => {
+                if (e.data.type == "buffer_stream"){
+                    // Sets all of our internal registers so that we immediatly start
+                    // playing and fading in the new buffer
+                    // Store the buffer we just got sent
+                    this.cur_buf = e.data.buf;
+                    // Reset playback cursor
+                    this.cur_buf_cursor = 0;
+                }
+                else if (e.data.type == "pause_state"){
+                    // This is a pretty simple message to handle,
+                    // just set the pause state to what we are told
+                    this.paused = e.data.paused;
+                }
+            };
+        }
+
+        // Returns a smoothed out version of the buffer in the beginning samples so that it
+        // can be replayed without popping
+        smooth(buf){
+            // We make sure our new buffer is completely new, not a reference to the old buffer
+            let smooth_buf = new Float32Array(buf);
+            // We use basically the same formula that we use in produce_sample (see below)
+            for (let i = 0; i < AudioFader.FADE_SAMPLES; i++){
+                // We count backwards from the end of the buffer
+                let cur_sample   = buf[APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES + i];
+                let fade_sample  = buf[APU.BUF_SIZE - AudioFader.FADE_SAMPLES      + i];
+                let mixed_sample = (((AudioFader.FADE_SAMPLES - i) * fade_sample)
+                                 +   (i                            * cur_sample ))
+                                 /    AudioFader.FADE_SAMPLES;
+                smooth_buf[APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES + i] = mixed_sample;
+                if (isNaN(mixed_sample)){
+                    console.log("NaN in smoothed buffer");
+                    console.log(buf);
+                    console.log(smooth_buf);
+                    console.log(i);
+                    console.log(cur_sample);
+                    console.log(fade_sample);
+                    console.log(AudioFader.LOOP_KEEP_SAMPLES);
+                    console.log(mixed_sample);
+                    throw new Error("NaN in smoothed buffer");
+                }
+            }
+            return smooth_buf;
+        }
+        
+        produce_sample(){
+            // We always produce and mix samples, the code managing our registers
+            // automatically takes care of making sure that they are at values
+            // which produce the desired results
+            // We also use % to make sure we don't go out of bounds of the buffer's length
+            let cur_sample  = this.cur_buf[this.cur_buf_cursor   % APU.BUF_SIZE];
+            let fade_sample = this.last_buf[this.last_buf_cursor % APU.BUF_SIZE];
+            // Scales according to the weight coefficients
+            let mix_out     = ((this.fade_length_counter                            * fade_sample)
+                            + ((AudioFader.FADE_SAMPLES - this.fade_length_counter) * cur_sample))
+                            /   AudioFader.FADE_SAMPLES;
+            if (isNaN(mix_out)){
+                console.log("fader mixer error. state:");
+                console.log(cur_sample);
+                console.log(fade_sample);
+                console.log(mix_out);
+                console.log(this.fade_length_counter);
+                console.log(this.cur_buf_cursor);
+                console.log(this.last_buf_cursor);
+                console.log(AudioFader.FADE_SAMPLES);
+                throw new Error();
+            }
+            // Mixing formula:
+            // LF + (T - L)C
+            // -------------
+            //       T
+            // C = Current sample
+            // F = Fade sample
+            // L = Fade length counter
+            // T = Total fade samples
+            // In short, this formula produces two scaling coefficients: L and (T - L),
+            // which start, respectively, at T and 0, which then linearly shift to being,
+            // respectively, at 0 and T. Finally, we divide the expression by T to scale
+            // these components to being between 0 and 1 to multiply them by their values,
+            // producing our desired weighted average.
+            return mix_out;
+        }
+
+        // Executes a sample and returns its mixed value, while also handling the
+        // internal register control logic with each pass
+        exec_sample(){
+            // We always calculate the mixer output, since the registers are setup
+            // in such a way that the mixer always produces the desired samples
+            let mix_out = this.produce_sample();
+            // Internal register control logic
+            // Always increase the fade buffer playback cursor and make it loop if it
+            // reaches the end of the buffer
+            this.last_buf_cursor++;
+            if (this.last_buf_cursor >= APU.BUF_SIZE){
+                // We reset it counting from the end of the buffer to LOOP_KEEP_SAMPLES
+                this.last_buf_cursor = APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES;
+            }
+            // If we are still playing the new buffer normally, increase
+            // the playback cursor and decrease the length counter if it's not 0
+            if (this.cur_buf_cursor < APU.BUF_SIZE){
+                this.cur_buf_cursor++;
+                if (this.fade_length_counter) this.fade_length_counter--;
+            }
+            // Otherwise if we have just run out of buffer fill the buffer
+            // with the smoothed version lf our current one, set the length
+            // counter to max for it to start counting down when we receive
+            // a new buffer, increas the cursor so that this event doesn't
+            // repeat and reset the fade counter cursor
+            else if (this.cur_buf_cursor == APU.BUF_SIZE){
+                this.last_buf = this.smooth(this.cur_buf);
+                this.last_buf_cursor = APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES;
+                this.fade_length_counter = AudioFader.FADE_SAMPLES;
+                this.cur_buf_cursor++;
+            }
+            // If we are paused, we override our output to the last sample we played to keep
+            // the signal level the same and not produce pops
+            mix_out = this.paused ? this.last_sample : mix_out;
+            // Update our last sample register
+            this.last_sample = mix_out;
+            // Return the mixed sample
+            return mix_out;
+        }
+        
+        process(inputs, outputs, parameters){
+            // We don't need to use the inputs or parameters
+            // If ouroutputs aren't arrays of arrays of arrays,
+            // we shouldn't even bother trying to process any I/O
+            // since something is clearly wrong or not ready yet
+            if (!outputs        ) return;
+            if (!(outputs[0])   ) return;
+            if (!(outputs[0][0])) return;
+            // We assume the buffers for each channel of each output node are the same length
+            for (let i = 0; i < outputs[0][0].length; i++){
+                let mix_out = this.exec_sample();
+                // Output the sample to every channel of every output node
+                for (let j = 0; j < outputs.length; j++){
+                    for (let k = 0; k < outputs[0].length; k++){
+                        outputs[j][k][i] = mix_out;
+                    }
+                }
+            }
+            // Inform our node the operation was completed successfully
             return true;
         }
     }

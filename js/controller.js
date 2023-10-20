@@ -111,7 +111,7 @@ class CONTROLLER{
         }
     }
     
-    bind_keys(){
+    bind_kb(){
         document.addEventListener("keydown", (e) => {
             // Only cancel default and handle event if the key is in our keybinds
             if (!Object.values(this.kb_binds).includes(e.code)) return;
@@ -124,7 +124,9 @@ class CONTROLLER{
             if (e.cancelable) e.preventDefault();
             this.kb_handle_change(e.code, 0x00);
         });
-        // We also set up our controller API listeners here
+    };
+
+    bind_gp(){
         window.addEventListener("gamepadconnected",    (e) => {
             this.gp_connected = true;
             this.gp_index     = e.gamepad.index;
@@ -132,10 +134,25 @@ class CONTROLLER{
         window.addEventListener("gamepaddisconnected", (e) => {
             this.gp_connected = false;
             this.gamepad      = null;
-        })
-    };
-
-    bind_buttons(){
+        });
+        // It may the case that a gamepad had already connected before
+        // we were created, so we check for that and keep the latest
+        // gamepad that is connected, which should be good enough for
+        // most cases
+        let gps = navigator.getGamepads();
+        for (let i = 0; i < gps.length; i++){
+            // We don't immediatly break because we want to keep the
+            // LATEST (higher index) gamepad connected, which is, in
+            // my experience, the one the user usually wants to use
+            if (gps[i].connected){
+                this.gp_connected = true;
+                this.gp_index     = i;
+                this.gamepad      = gps[i];
+            }
+        }
+    }
+    
+    bind_bt(){
         document.getElementById(this.bt_container).childNodes.forEach((bt) => {
             bt.addEventListener("touchstart", (e) => {
                 this.bt_handle_change(bt.id.split("-")[1], 0x01);

@@ -78,13 +78,20 @@ class NES{
         this.fps_display = document.getElementById("fps-counter");
         this.prev_ts = window.performance.now() / 1000;
         this.fps_update_ts = this.prev_ts;
-        this.controller.bind_keys();
-        this.controller.bind_buttons();
+        this.controller.bind_kb();
+        this.controller.bind_gp();
+        this.controller.bind_bt();
         this.mmap.load_rom(rom);
         this.apu.init_sound();
         this.ppu.init_buffers();
         this.ppu.load_normal_palette();
         this.cpu.reset();
+    }
+
+    destroy(){
+        // We only really need to destroy the audio pipeline and clear the canvas
+        this.apu.destroy_sound();
+        this.ctx.clearRect(0, 0, 256, 240);
     }
 
     to_json(){

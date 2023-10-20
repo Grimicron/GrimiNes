@@ -2,7 +2,9 @@
 <html>
 	<head>
 		<title>GrimiNes</title>
-        <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/> 
+        <meta charset="UTF-8"/>
+        <meta name="apple-mobile-web-app-capable" content="yes"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no"/> 
 		<link rel="stylesheet" href="style.css"/>
 	</head>
 	<body>
@@ -27,24 +29,26 @@
             </ul>
             <canvas id="screen" width="256" height="240"></canvas>
             <div id="actions-container">
-                <button id="save-button">SAVE</button>
+                <button id="q-save-button">QUICK SAVE</button>
+                <button id="q-load-button">QUICK LOAD</button>
+                <button id="f-save-button">FILE SAVE</button>
                 <input id="load-input" type="file" name="load-input"/>
-                <button id="load-button">LOAD</button>
+                <button id="f-load-button">FILE LOAD</button>
                 <button id="reset-button">RESET</button>
                 <button id="quit-button">QUIT</button>
             </div>
-        </div>
-        <p id="fps-counter"></p>
-        <div id="tactile-overlay">
-            <img id="bt-a"      src="img/buttons/nes_controller_a.png"     />
-            <img id="bt-b"      src="img/buttons/nes_controller_b.png"     />
-            <img id="bt-select" src="img/buttons/nes_controller_select.png"/>
-            <img id="bt-start"  src="img/buttons/nes_controller_start.png" />
-            <img id="bt-up"     src="img/buttons/nes_controller_arrow.png"/>
-            <img id="bt-down"   src="img/buttons/nes_controller_arrow.png"/>
-            <img id="bt-left"   src="img/buttons/nes_controller_arrow.png"/>
-            <img id="bt-right"  src="img/buttons/nes_controller_arrow.png"/>
-            <img id="bt-pad"    src="img/buttons/nes_controller_pad.png"  />
+            <p id="fps-counter"></p>
+            <div id="tactile-overlay">
+                <img id="bt-a"      src="img/buttons/nes_controller_a.png"     />
+                <img id="bt-b"      src="img/buttons/nes_controller_b.png"     />
+                <img id="bt-select" src="img/buttons/nes_controller_select.png"/>
+                <img id="bt-start"  src="img/buttons/nes_controller_start.png" />
+                <img id="bt-up"     src="img/buttons/nes_controller_arrow.png" />
+                <img id="bt-down"   src="img/buttons/nes_controller_arrow.png" />
+                <img id="bt-left"   src="img/buttons/nes_controller_arrow.png" />
+                <img id="bt-right"  src="img/buttons/nes_controller_arrow.png" />
+                <img id="bt-pad"    src="img/buttons/nes_controller_pad.png"   />
+            </div>
         </div>
         <script src="js/utils.js"     ></script>
         <script src="js/logger.js"    ></script>

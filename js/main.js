@@ -1,15 +1,19 @@
-let rom_input    = null;
-let rom_button   = null;
-let reset_button = null;
-let save_button  = null;
-let load_button  = null;
-let load_input   = null;
-let quit_button  = null;
-let canvas       = null;
-let ctx          = null;
-let fr           = null;
-let my_nes       = null;
-let bt_overlay   = null;
+let rom_input     = null;
+let rom_button    = null;
+let reset_button  = null;
+let q_save_button = null;
+let q_load_button = null;
+let f_save_button = null;
+let load_input    = null;
+let f_load_button = null;
+let reload_button = null;
+let quit_button   = null;
+let canvas        = null;
+let ctx           = null;
+let fr            = null;
+let my_nes        = null;
+let bt_overlay    = null;
+let last_save     = null;
 
 function dump_pattern_table(offset){
     let palette = [
@@ -52,14 +56,14 @@ function frame(){
 function init_nes(rom){
     // Hide overflow to make game as visible at all times as possible and
     // to prevent the user form accidentally scrolling away just in case
-    window.scrollTo(0, 0);
-    document.getElementById("game-container").style.overflow = "hidden";
-    canvas.style.display        = "block";
-    reset_button.style.display  = "block";
-    save_button.style.display   = "block";
-    load_button.style.display   = "block";
-    quit_button.style.display   = "block";
-    rom_button.style.display    = "none";
+    // This is the only way to set the property as important
+    document.body.setAttribute("style", "overflow-y: hidden !important;");
+    document.getElementById("game-container").style.overflowY = "hidden";
+    canvas.style.display = "block";
+    document.querySelectorAll("#actions-container button").forEach((b) => {
+       b.style.display = "block"; 
+    });
+    rom_button.style.display = "none";
     document.getElementById("quick-rom-select-container").style.display = "none";
     document.getElementById("main-title").style.display = "none";
     my_nes.init(ctx, rom);
@@ -67,22 +71,25 @@ function init_nes(rom){
     window.requestAnimationFrame(frame);
     // Undo transparency transition
     document.getElementById("game-container").classList.toggle("transitioning");
+    bt_overlay.style.display = "block";
     bt_overlay.classList.add("ingame");
 }
 
 function deinit_nes(){
-    document.getElementById("game-container").style.overflow = "scroll";
+    document.body.setAttribute("style", "overflow-y: auto !important;");
+    document.getElementById("game-container").style.overflowY = "auto";
     canvas.style.display = "none";
-    reset_button.style.display = "none";
-    save_button.style.display = "none";
-    load_button.style.display = "none";
-    quit_button.style.display = "none";
+    document.querySelectorAll("#actions-container button").forEach((b) => {
+       b.style.display = "none"; 
+    });
     rom_button.style.display = "block";
     document.getElementById("quick-rom-select-container").style.display = "grid";
     document.getElementById("main-title").style.display = "block";
+    // Prepares the NES to be collected by the garbage collector and not leave
+    // any persistent objects/processes
+    my_nes.destroy();
     my_nes = new NES();
     document.getElementById("game-container").classList.toggle("transitioning");
-    bt_overlay.classList.remove("ingame");
 }
 
 function quick_load(name){
@@ -96,6 +103,7 @@ function quick_load(name){
         document.getElementById("game-container").classList.toggle("transitioning");
         setTimeout(() => {
             init_nes(new Uint8Array(req.response));
+            window.scrollTo(0, 0);
         }, 500);
     };
     req.send();
@@ -126,20 +134,27 @@ function inject_rom_list_info(){
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    bt_overlay   = document.getElementById("tactile-overlay");
-    rom_input    = document.getElementById("rom-input");
-    rom_button   = document.getElementById("rom-button");
-    reset_button = document.getElementById("reset-button");
-    save_button  = document.getElementById("save-button");
-    load_button  = document.getElementById("load-button");
-    load_input   = document.getElementById("load-input");
-    quit_button  = document.getElementById("quit-button");
-    canvas       = document.getElementById("screen");
-    ctx          = canvas.getContext("2d");
-    fr           = new FileReader();
-    my_nes       = new NES();
+    bt_overlay    = document.getElementById("tactile-overlay");
+    rom_input     = document.getElementById("rom-input");
+    rom_button    = document.getElementById("rom-button");
+    reset_button  = document.getElementById("reset-button");
+    q_save_button = document.getElementById("q-save-button");
+    q_load_button = document.getElementById("q-load-button");
+    f_save_button = document.getElementById("f-save-button");
+    f_load_button = document.getElementById("f-load-button");
+    load_input    = document.getElementById("load-input");
+    reload_button = document.getElementById("reload-button");
+    quit_button   = document.getElementById("quit-button");
+    canvas        = document.getElementById("screen");
+    ctx           = canvas.getContext("2d");
+    fr            = new FileReader();
+    my_nes        = new NES();
     ctx.imageSmoothingEnabled = false;
     ctx.mozImageSmoothingEnabled = false;
+    document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
+    window.addEventListener("resize", () => {
+        document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
+    });
 
     try_uri_load();
     inject_rom_list_info();
@@ -154,6 +169,7 @@ document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("game-container").classList.toggle("transitioning");
             setTimeout(() => {
                 init_nes(new Uint8Array(fr.result));
+                window.scrollTo(0, 0);
             }, 500);
         };
     };
@@ -164,25 +180,39 @@ document.addEventListener("DOMContentLoaded", () => {
         my_nes.reset();
         dump_pattern_tables(0x0000);
     };
-    save_button.onclick = () => {
-        download("grimines_save.state", [JSON.stringify(my_nes.to_json())]);
+    q_save_button.onclick = () => {
+        last_save = my_nes.to_json();
     };
-    load_button.onclick = () => {
+    q_load_button.onclick = () => {
+        my_nes.from_json(last_save);
+    };
+    f_save_button.onclick = () => {
+        last_save = my_nes.to_json();
+        download("grimines_save.state", [JSON.stringify(last_save)]);
+    };
+    f_load_button.onclick = () => {
         load_input.click();
     };
     load_input.onchange = () => {
         fr.readAsText(load_input.files[0]);
         fr.onloadend = (e) => {
-            my_nes.from_json(JSON.parse(fr.result));
+            last_save = JSON.parse(fr.result);
+            my_nes.from_json(last_save);
         };
     };
+    document.addEventListener("keydown", (e) => {
+        if     ((e.code == "KeyR") && (last_save != null)) my_nes.from_json(last_save);
+        else if (e.code == "KeyE"){
+            last_save = my_nes.to_json();
+        }
+    });
     quit_button.onclick = () => {
         document.getElementById("game-container").classList.toggle("transitioning");
+        bt_overlay.classList.remove("ingame");
         setTimeout(() => {
+            bt_overlay.style.display = "none";
             deinit_nes();
+            window.scrollTo(0, 0);
         }, 500);
-    };
-    document.onclick = (e) => {
-        console.log(e.target);
     };
 });

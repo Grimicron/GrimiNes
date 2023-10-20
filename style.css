@@ -1,24 +1,42 @@
-html, body{
-    height: 100%;
-    width: 100%;
-    margin: 0%;
-    padding: 0%;
-    overflow-x: hidden;
+ :root{
+    --bt-scale: 8vw;
+    --app-height: 100vh;
+}
+
+html{
+    width: 100% !important;
+    max-width: 100% !important;
+    height: var(--app-height);
+    overflow-x: hidden !important;
     background-color: #1c1c1c;
     user-select: none;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
 }
 
+body{
+    width: 100% !important;
+    max-width: 100% !important;
+    height: var(--app-height);
+    margin: 0%;
+    padding: 0%;
+    margin: 0%;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+
 div{
     pointer-events: auto;
 }
 
 #game-container{
-    width: 100%;
+    width: 100vw;
     margin: 0%;
     padding: 0%;
     display: flex;
+    overflow-y: auto;
+    overflow-x: hidden;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -26,7 +44,6 @@ div{
     filter: blur(0px);
     transform: scale(1.0);
     transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
-    overflow: scroll;
 }
 
 #game-container.transitioning{
@@ -34,7 +51,6 @@ div{
     opacity: 0;
     filter: blur(5px);
     transform: scale(2.0);
-    overflow: hidden !important;
 }
 
 #main-title{
@@ -97,8 +113,8 @@ div{
     display: none;
     margin: 0%;
     padding: 0%;
-    width: min(106.66vh, 100vw);
-    height: min(100vh, 93.75vw);
+    width: min(var(--app-height)*1.07, 100vw);
+    height: min(var(--app-height), 93.75vw);
 }
 
 input{
@@ -120,7 +136,7 @@ button{
 #rom-button{
     padding: min(4vw, 20px);
     margin: min(1vw, 5px);
-    font-size: min(4vw, 1.3m);
+    font-size: min(4vw, 1.3em);
 }
 
 #actions-container{
@@ -150,6 +166,8 @@ p{
 }
 
 #fps-counter{
+    overflow-x: hidden;
+    overflow-y: hidden;
     font-size: 1em;
     position: absolute;
     top: 5px;
@@ -160,6 +178,9 @@ p{
 }
 
 #tactile-overlay{
+    display: none;
+    overflow-y: hidden;
+    overflow-x: hidden;
     position: absolute;
     pointer-events: none;
     top: 0px;
@@ -183,8 +204,8 @@ p{
 }
 
 @media (hover:hover){
-    #tactile-overlay.ingame{
-        display: none;
+    #tactile-overlay{
+        display: none !important;
     }
 }
 
@@ -192,74 +213,73 @@ p{
     pointer-events: auto;
     margin: 0%;
     padding: 0%;
-    width: auto;
-    height: auto;
     position: absolute;
     opacity: 0.5;
 }
 
 #bt-a{
-    max-width: 13vw;
-    max-height: 13vw;
+    width: calc(var(--bt-scale)*1.6);
+    height: calc(var(--bt-scale)*1.6);
     right: 5px;
-    bottom: calc(10vw + 5px);
+    bottom: calc(1.3*var(--bt-scale) + 12px);
 }
 
 #bt-b{
-    max-width: 13vw;
-    max-height: 13vw;
-    right: calc(15vw + 5px);
-    bottom: calc(10vw + 5px);
+    width: calc(var(--bt-scale)*1.6);
+    height: calc(var(--bt-scale)*1.6);
+    right: calc(1.6*var(--bt-scale) + 12px);
+    bottom: calc(1.3*var(--bt-scale) + 12px);
 }
 
 #bt-select{
-    max-width: 10vw;
-    max-height: 10vw;
+    width: calc(var(--bt-scale)*1.3);
+    height: calc(var(--bt-scale)*1.3*0.682);
     left: 5px;
     bottom: 5px;
 }
 
 #bt-start{
-    max-width: 10vw;
-    max-height: 10vw;
+    width: calc(var(--bt-scale)*1.3);
+    height: calc(var(--bt-scale)*1.3*0.682);
     right: 5px;
     bottom: 5px;
 }
 
 #bt-up{
     transform: rotate(90deg);
-    max-width: 7vw;
-    max-height: 7vw;
-    left: calc(7vw + 5px);
-    bottom: calc(24vw + 12px);
+    width: var(--bt-scale);
+    height: var(--bt-scale);
+    left: calc(var(--bt-scale) + 5px);
+    bottom: calc(3.3*var(--bt-scale) + 12px);
 }
 
 #bt-down{
     transform: rotate(270deg);
-    max-width: 7vw;
-    max-height: 7vw;
-    left: calc(7vw + 5px);
-    bottom: calc(10vw + 12px);
+    width: var(--bt-scale);
+    height: var(--bt-scale);
+    left: calc(var(--bt-scale) + 5px);
+    bottom: calc(1.3*var(--bt-scale) + 12px);
 }
 
 #bt-left{
-    max-width: 7vw;
-    max-height: 7vw;
+    transform: rotate(0deg);
+    width: var(--bt-scale);
+    height: var(--bt-scale);
     left: 5px;
-    bottom: calc(17vw + 12px);
+    bottom: calc(2.3*var(--bt-scale) + 12px);
 }
 
 #bt-right{
     transform: rotate(180deg);
-    max-width: 7vw;
-    max-height: 7vw;
-    left: calc(14vw + 5px);
-    bottom: calc(17vw + 12px);
+    width: var(--bt-scale);
+    height: var(--bt-scale);
+    left: calc(2*var(--bt-scale) + 5px);
+    bottom: calc(2.3*var(--bt-scale) + 12px);
 }
 
 #bt-pad{
-    max-width: 7vw;
-    max-height: 7vw;
-    left: calc(7vw + 5px);
-    bottom: calc(17vw + 12px);
+    width: var(--bt-scale);
+    height: var(--bt-scale);
+    left: calc(var(--bt-scale) + 5px);
+    bottom: calc(2.3*var(--bt-scale) + 12px);
 }
