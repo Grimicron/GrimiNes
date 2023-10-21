@@ -867,6 +867,10 @@ class PPU{
             // saved sprite buffer, since there's no next scanline
             // to use it in
             this.prev_spr_buf = { buf: new Uint8Array(256), sprz: new Uint8Array(256) };
+            // Same reasoning for this as in sprite_scanline
+            for (let i = 0; i < 256; i++){
+                this.prev_spr_buf.buf[i] = 0x0F;
+            }
         }
         // Start of VBlank period
         else if (this.scanline == 241){

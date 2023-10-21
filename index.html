@@ -13,19 +13,20 @@
 		    <input id="rom-input" type="file" name="rom-input"/>
             <button id="rom-button">UPLOAD ROM</button>
             <ul id="quick-rom-select-container">
-                <li rom="1942"       >1942</li>
-                <li rom="arkanoid"   >ARKANOID</li>
-                <li rom="castlevania">CASTLEVANIA</li>
-                <li rom="commando"   >COMMANDO</li>
-                <li rom="contra"     >CONTRA</li>
-                <li rom="donkeykong" >DONKEY KONG</li>
-                <li rom="galaga"     >GALAGA</li>
-                <li rom="iceclimber" >ICE CLIMBER</li>
-                <li rom="megaman"    >MEGA MAN</li>
-                <li rom="megamanii"  >MEGA MAN 2</li>
-                <li rom="smb"        >SUPER MARIO BROS.</li>
-                <li rom="zelda"      >THE LEGEND OF ZELDA</li>
-                <li rom="zeldaii"    >ZELDA II: THE ADVENTURE OF LINK</li>
+                <li rom="1942"          >1942</li>
+                <li rom="arkanoid"      >ARKANOID</li>
+                <li rom="castlevania"   >CASTLEVANIA</li>
+                <li rom="commando"      >COMMANDO</li>
+                <li rom="contra"        >CONTRA</li>
+                <li rom="donkeykong"    >DONKEY KONG</li>
+                <li rom="galaga"        >GALAGA</li>
+                <li rom="ghostsngoblins">GHOSTS N' GOBLINS</li>
+                <li rom="iceclimber"    >ICE CLIMBER</li>
+                <li rom="megaman"       >MEGA MAN</li>
+                <li rom="megamanii"     >MEGA MAN 2</li>
+                <li rom="smb"           >SUPER MARIO BROS.</li>
+                <li rom="zelda"         >THE LEGEND OF ZELDA</li>
+                <li rom="zeldaii"       >ZELDA II: THE ADVENTURE OF LINK</li>
             </ul>
             <canvas id="screen" width="256" height="240"></canvas>
             <div id="actions-container">
@@ -36,8 +37,10 @@
                 <button id="f-load-button">FILE LOAD</button>
                 <button id="reset-button">RESET</button>
                 <button id="quit-button">QUIT</button>
+                <button id="overlay-button">TOGGLE BUTTONS</button>
             </div>
             <p id="fps-counter"></p>
+            <div id="notification-container"></div>
             <div id="tactile-overlay">
                 <img id="bt-a"      src="img/buttons/nes_controller_a.png"     />
                 <img id="bt-b"      src="img/buttons/nes_controller_b.png"     />
@@ -50,15 +53,15 @@
                 <img id="bt-pad"    src="img/buttons/nes_controller_pad.png"   />
             </div>
         </div>
-        <script src="js/utils.js"     ></script>
-        <script src="js/logger.js"    ></script>
-        <script src="js/mappers.js"   ></script>
-        <script src="js/mmap.js"      ></script>
-        <script src="js/controller.js"></script>
-        <script src="js/apu.js"       ></script>
-        <script src="js/ppu.js"       ></script>
-		<script src="js/cpu.js"       ></script>
-        <script src="js/nes.js"       ></script>
-		<script src="js/main.js"      ></script>
+        <script src="script/utils.js"     ></script>
+        <script src="script/logger.js"    ></script>
+        <script src="script/mappers.js"   ></script>
+        <script src="script/mmap.js"      ></script>
+        <script src="script/controller.js"></script>
+        <script src="script/apu.js"       ></script>
+        <script src="script/ppu.js"       ></script>
+		<script src="script/cpu.js"       ></script>
+        <script src="script/nes.js"       ></script>
+		<script src="script/main.js"      ></script>
 	</body>
 </html>

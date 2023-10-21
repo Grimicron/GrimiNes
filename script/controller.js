@@ -1,18 +1,21 @@
 class CONTROLLER{
     constructor(p_nes, p_kb_binds, p_gpbinds, p_bt_container){
         this.nes          = p_nes;
+        // All the keybind info is set in a separate function so
+        /// that it is more flexible, they all start off as not set
+        // (so that they don't give any errors)
         // p_keybinds is an object which has 8 properties:
         // a, b, select, start, up, down, left, right
         // Each of these properties has a key assigned to it
         // identifying the key which is bound to its respective button
-        this.kb_binds     = p_kb_binds;
+        this.kb_binds     = null;
         // Controller API properties
         this.gp_connected = false;
-        this.gp_binds     = p_gpbinds;
+        this.gp_binds     = null;
         this.gp_index     = 0;
         // Tactile buttons container (each button will have a property
         // which describes which button they correspond to)
-        this.bt_container = p_bt_container;
+        this.bt_container = null;
         // An array with the state of the controller
         // since it was last updated
         // It's in the order laid out above
@@ -28,7 +31,7 @@ class CONTROLLER{
         // continuosly reloaded and read_index reset
         this.strobe_bit   = 0x00;
     }
-
+    
     to_json(){
         return {
             // It might be useful to keep the binds
@@ -50,6 +53,12 @@ class CONTROLLER{
         this.state        = state.state;
         this.read_index   = state.read_index;
         this.strobe_bit   = state.strobe_bit;
+    }
+
+    set_binds(p_kb_binds, p_gp_binds, p_bt_container){
+        this.kb_binds     = p_kb_binds;
+        this.gp_binds     = p_gp_binds;
+        this.bt_container = p_bt_container;
     }
 
     // This function simply halfs the code size, not much else to it
@@ -112,21 +121,25 @@ class CONTROLLER{
     }
     
     bind_kb(){
+        // We don't try to set up the event listeners if the keyboard binds haven't
+        // been set yet
+        if (this.kb_binds == null) return;
         document.addEventListener("keydown", (e) => {
             // Only cancel default and handle event if the key is in our keybinds
             if (!Object.values(this.kb_binds).includes(e.code)) return;
-            if (e.cancelable) e.preventDefault();
+            prev_default(e);
             this.kb_handle_change(e.code, 0x01);
         });
         document.addEventListener("keyup",   (e) => {
             // Same as before
             if (!Object.values(this.kb_binds).includes(e.code)) return;
-            if (e.cancelable) e.preventDefault();
+            prev_default(e);
             this.kb_handle_change(e.code, 0x00);
         });
     };
 
     bind_gp(){
+        // Detect gamepads that connect after our creation
         window.addEventListener("gamepadconnected",    (e) => {
             this.gp_connected = true;
             this.gp_index     = e.gamepad.index;
@@ -137,10 +150,13 @@ class CONTROLLER{
         });
         // It may the case that a gamepad had already connected before
         // we were created, so we check for that and keep the latest
-        // gamepad that is connected, which should be good enough for
-        // most cases
+        // gamepad that is connected, which should be good enough for most cases
         let gps = navigator.getGamepads();
         for (let i = 0; i < gps.length; i++){
+            // Some browsers have their gamepad array filled with null
+            // instead of having it be empty, so we skip those which are
+            // null or undefined (undefined == null -> true)
+            if (gps[i] == null) continue;
             // We don't immediatly break because we want to keep the
             // LATEST (higher index) gamepad connected, which is, in
             // my experience, the one the user usually wants to use
@@ -153,42 +169,45 @@ class CONTROLLER{
     }
     
     bind_bt(){
-        document.getElementById(this.bt_container).childNodes.forEach((bt) => {
+        let cont = document.getElementById(this.bt_container);
+        // If the container doesn't exist/hasn't been set yet in our binds,
+        // we don't try to set up the listeners
+        if (cont == null) return;
+        cont.childNodes.forEach((bt) => {
             bt.addEventListener("touchstart", (e) => {
                 this.bt_handle_change(bt.id.split("-")[1], 0x01);
-                // Stop unwanted selections/zooms
-                if (!e.cancelable) return;
-                e.preventDefault();
-                e.stopPropagation();
+                prev_default(e);
             });
             bt.addEventListener("touchend",   (e) => {
                 this.bt_handle_change(bt.id.split("-")[1], 0x00);
-                // Same as before
-                if (!e.cancelable) return;
-                e.preventDefault();
-                e.stopPropagation();
+                prev_default(e);
             });
         });
+        // Also prevent unwanted scrolling/touch events for the whole document
         document.addEventListener("touchstart", (e) => {
-            if (!e.cancelable) return;
-            e.preventDefault();
-            e.stopPropagation();
+            prev_default(e);
         });
         document.addEventListener("touchstart", (e) => {
-            if (!e.cancelable) return;
-            e.preventDefault();
-            e.stopPropagation();
+            prev_default(e);
         });
     }
     
     read_gamepad(){
+        // We don't try to read the gamepad if the binds haven't been set
+        if (!this.gp_binds) return;
         // Since the controller API has a simple interface where we can simply
         // poll the state of the controller, we don't have to do event-based
-        // keydown/keyup detection, just use the state of the controller here
+        // keydown/keyup detection, just read the state of the controller
+        // at the exact moment we want it
         if (!this.gp_connected) return;
         let gamepad = navigator.getGamepads()[this.gp_index];
+        // Return if gamepad is undefined or null
         if (!gamepad) return;
-        // Use keybinds to set state of buffer_state
+        // We use this weird undefined-coalescing workaround so that
+        // we can accept d-pad input as well as axes input, because gamepads
+        // that use axes input are indexed up to 11 most of the time, which
+        // is lower than the indexing for d-pad input separated from joystick
+        // input, which starts at 12, causing an undefined error
         this.gp_state[0] = !!(gamepad.buttons[this.gp_binds.a     ] || {}).pressed;
         this.gp_state[1] = !!(gamepad.buttons[this.gp_binds.b     ] || {}).pressed;
         this.gp_state[2] = !!(gamepad.buttons[this.gp_binds.select] || {}).pressed;
@@ -197,7 +216,7 @@ class CONTROLLER{
         this.gp_state[5] = !!(gamepad.buttons[this.gp_binds.down  ] || {}).pressed;
         this.gp_state[6] = !!(gamepad.buttons[this.gp_binds.left  ] || {}).pressed;
         this.gp_state[7] = !!(gamepad.buttons[this.gp_binds.right ] || {}).pressed;
-        // Also use state of axes to update the buffer_state
+        // Also use state of axes to update the gamepad state
         if (gamepad.axes.length >= 2){
             if      (gamepad.axes[0] >=  0.75) this.gp_state[7] = 0x01;
             else if (gamepad.axes[0] <= -0.75) this.gp_state[6] = 0x01;

@@ -25,12 +25,20 @@ function bn_fmt(num, nibbles=4, prefix=false){
 }
 
 function download(filename, data){
-    let el = document.createElement("a");
+    let e = document.createElement("a");
     let file = new Blob(data, { type: "text/plain" });
-    el.href = URL.createObjectURL(file);
-    el.download = filename;
-    el.style.display = "none";
-    document.body.appendChild(el);
-    el.click();
-    document.body.removeChild(el);
+    e.href = URL.createObjectURL(file);
+    e.download = filename;
+    e.style.display = "none";
+    document.body.appendChild(e);
+    e.click();
+    document.body.removeChild(e);
+}
+
+// A utility function to prevent the default event from happening
+// in all listeners where it's desirable (e.g. the tactile overlay's listeners)
+function prev_default(e){
+    if (!e.cancelable) return;
+    e.preventDefault();
+    e.stopPropagation();
 }

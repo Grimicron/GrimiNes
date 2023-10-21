@@ -257,8 +257,6 @@ class APU{
         // not as fast as the Web Audio API)
         this.low_pass           = null;
         this.high_pass          = null;
-        // Initialized in init_sound()
-        this.ctx                = null;
     }
 
     // These two functions are quite big because we have lots of internal registers
@@ -390,42 +388,54 @@ class APU{
         this.volume             = state.volume             || 0;
     }
 
+    // Audio pipeline:
+    // put_sample ══> buffer ══> fader ══> low_pass ══> high_pass ══> ctx.destination
+    // Called after all the audio nodes have been created
+    init_pipeline(){
+        this.fader.connect(this.low_pass);
+        this.low_pass.connect(this.high_pass);
+        this.high_pass.connect(this.nes.audio_ctx.destination);
+        let pause_handler = () => {
+            // Only taking into account if the document is focused can be pretty
+            // misleading, since someone using a side-by-side layout would get their
+            // game silenced for just cliking off for a second, so we also count the
+            // document as unpaused if it's visible
+            let active = (document.visibilityState == "visible") || document.hasFocus();
+            // Disconnect the pipeline from the speakers to effectively silence it
+            // when we are unfocused and inform the fader of it just in case it helps
+            // reduce popping
+            this.fader.port.postMessage({ type: "pause_state", paused: (!active)});
+            if (active) this.high_pass.connect(this.nes.audio_ctx.destination);
+            else        this.high_pass.disconnect();
+        }
+        document.addEventListener("focus"           , () => { pause_handler(); });
+        document.addEventListener("blur"            , () => { pause_handler(); });
+        document.addEventListener("visibilitychange", () => { pause_handler(); });
+    }
+    
     init_sound(){
-        this.ctx                       = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: APU.SAMPLE_RATE});
         this.buffer                    = new Float32Array(APU.BUF_SIZE);
-        this.low_pass                  = this.ctx.createBiquadFilter();
+        this.low_pass                  = this.nes.audio_ctx.createBiquadFilter();
         this.low_pass.type             = "lowpass";
         this.low_pass.frequency.value  = 14_000;
-        this.high_pass                 = this.ctx.createBiquadFilter();
+        this.high_pass                 = this.nes.audio_ctx.createBiquadFilter();
         this.high_pass.type            = "highpass";
         // In reality, the NES applies 2 high-pass filters, one at 90Hz
         // and another afterwards at 440Hz, which just effectively results
         // in a 440Hz highpass filter (I think)
         this.high_pass.frequency.value = 440;
-        this.ctx.audioWorklet.addModule("js/apu.js").then(() => {
-            // Set up the pipeline once the promise of adding the module has been completed
-            this.fader = new AudioWorkletNode(this.ctx, "AudioFader");
-            this.fader.connect(this.low_pass);
-            this.low_pass.connect(this.high_pass);
-            this.high_pass.connect(this.ctx.destination);
-            let pause_handler = () => {
-                // Only taking into account if the document is focused can be pretty
-                // misleading, since someone using a side-by-side layout would get their
-                // game silenced for just cliking off for a second, so we also count the
-                // document as unpaused if it's visible
-                let active = (document.visibilityState == "visible") || document.hasFocus();
-                this.fader.port.postMessage({ type: "pause_state", paused: (!active)});
-                if (active) this.high_pass.connect(this.ctx.destination);
-            }
-            // Disconnect the pipeline from the speakers to effectively silence it
-            // when we are unfocused and inform the fader of it just in case it helps
-            // reduce popping
-            document.addEventListener("focus"           , () => { pause_handler(); });
-            document.addEventListener("blur"            , () => { pause_handler(); });
-            document.addEventListener("visibilitychange", () => { pause_handler(); });
-        });
-        // Audio pipeline:
-        // put_sample ══> buffer ══> fader ══> low_pass ══> high_pass ══> ctx.destination
+        // Try to create our audio fader
+        try{
+            this.fader = new AudioWorkletNode(this.nes.audio_ctx, "AudioFader");
+            this.init_pipeline();
+        }
+        // Register it if it hasn't already been registered
+        catch(e){
+            this.nes.audio_ctx.audioWorklet.addModule("/script/apu.js").then(() => {
+                this.fader = new AudioWorkletNode(this.nes.audio_ctx, "AudioFader");
+                this.init_pipeline();
+            });
+        }
     }
 
     destroy_sound(){
@@ -433,7 +443,6 @@ class APU{
         this.fader.disconnect();
         this.low_pass.disconnect();
         this.high_pass.disconnect();
-        this.ctx.close();
     }
 
     // All the setters are kinda bulky, but it is what it is
@@ -1033,131 +1042,9 @@ class APU{
 // We put this in a try catch statement because the declaraction of this class is
 // only supposed to occur inside the scope of the audio context, where
 // AudioWorkletProcessor exists, however it automatically tries to declare this class
-// when the document is loaded, so we have to catch and ignore that error
+// when the document is loaded, so we have to catch that error and ignore it
 try{
     class AudioFader extends AudioWorkletProcessor{
-        /*
-        // Represents to how many samples starting from the beginning and end we should
-        // fade in from the beginning with the last played audio sample as a reference,
-        // used both when switching buffers and looping a buffer while waiting for the next one
-        // The buffer length should be greater that this for optimal quality
-        // This helps to greatly reduce audio popping
-        static FADE_SAMPLES      = 40;
-        // Represents how many samples from our buffer starting from the end
-        // we should keep looping while waiting for our next buffer to fill up
-        // Should be equal to or larger than FADE_SAMPLES for optimal quality and
-        // has to be bigger than the length of the audio buffer we receive, otherwise
-        // it will produce an error because it will try to access an element which
-        // is undefined
-        static LOOP_KEEP_SAMPLES = 50;
-
-        constructor(...args){
-            // We don't really care about what arguments we receive in our
-            // constructor, so we just give them to our super()
-            super(...args);
-            // We start off assuming we are focused
-            this.paused = false;
-            // Start off with 0.0 as a default value
-            this.last_sample         = 0.0;
-            // The last sample we played before we entered the fade stage
-            this.last_fade_sample    = 0.0;
-            this.fade_sample_counter = 0;
-            // Start with a buffer with just enough elements at 0.0
-            // to not produce any errors while in the initialization period
-            // just in case
-            this.cur_buf             = new Float32Array(AudioFader.LOOP_KEEP_SAMPLES);
-            // Represents which sample of our buffer we are going to play
-            this.cur_sample          = 0;
-            // This is the only way we can communicate with our corresponding
-            // AudioNode, so whenever we receive a message, we set our buffer
-            // to the buffer we got sent
-            this.port.onmessage = (e) => {
-                if (e.data.type == "buffer_stream"){
-                    this.cur_buf = e.data.buf;
-                    // Receiving a new buffer sends us into the fade stage and
-                    // resets our buffer read cursor
-                    this.cur_sample = 0;
-                    this.fade_sample_counter = AudioFader.FADE_SAMPLES;
-                    // We should also update the last fade sample to reduce
-                    // popping just in case we were in the fade stage of the
-                    // buffer waiting loop
-                    this.last_fade_sample = this.last_sample;
-                }
-                else if (e.data.type == "pause_state"){
-                    // Update our internal register based on the
-                    // state we have been sent
-                    this.paused = e.data.paused;
-                }
-            };
-        }
-    
-        process(inputs, outputs, parameters){
-            // If our outputs isn't an array of arrays of arrays,
-            // it means we aren't properly hookep up to the pipeline
-            // and should wait until we are
-            if (!outputs)       return;
-            if (!outputs[0])    return;
-            if (!outputs[0][0]) return;
-            // If we have been paused, we keep the waveform level untouched
-            // by playing the last sample over and over
-            if (this.paused){
-                for (let i = 0; i < outputs.length; i++){
-                    for (let j = 0; j < outputs[i].length; j++){
-                        for (let k = 0; k < outputs[i][j].length; k++){
-                            outputs[i][j][k] = this.last_sample;
-                        }
-                    }
-                }
-                return;
-            }
-            // We work with just a mono-channel buffer, so we need to set
-            // the mixed output of the buffer to every channel of every
-            // output node we are connected to, so we just assume that
-            // every chunk we receive in this function for every channel
-            // for every output node is the same length, do the calculations
-            // for one channel, and write the result to all of them
-            for (let i = 0; i < outputs[0][0].length; i++){
-                let sample_out = 0.0;
-                // Mix samples if we are in the fade stage
-                if (this.fade_sample_counter){
-                    // Calculate proportion for the last sample and the new sample
-                    let last_prop = this.fade_sample_counter / AudioFader.FADE_SAMPLES;
-                    let new_prop  = 1.0 - last_prop;
-                    // Mix the last sample before the fade stage and the sample we are
-                    // currently playing according to their proportions
-                    sample_out    = (this.last_fade_sample * last_prop) + (this.cur_buf[this.cur_sample] * new_prop);
-                    // Finally decrement fade sample counter
-                    this.fade_sample_counter--;
-                }
-                // Otherwise leave buffer sample untouched and update the
-                // last fade sample
-                else{
-                    sample_out = this.cur_buf[this.cur_sample];
-                    this.last_fade_sample = sample_out;
-                }
-                // Update last sample we played
-                this.last_sample = sample_out;
-                // Increment read cursor
-                this.cur_sample++;
-                // Reset read counter if we reached the end of the buffer
-                // and enter fade stage
-                if (this.cur_sample >= this.cur_buf.length){
-                    // We don't reset it to the beginning, but to the
-                    // first loop keep sample we keep for replaying
-                    this.cur_sample = this.cur_buf.length - AudioFader.LOOP_KEEP_SAMPLES;
-                    this.fade_sample_counter = AudioFader.FADE_SAMPLES;
-                }
-                // Write our output to every channel of every output node
-                // The indexing is a little bit weird but it is what it is
-                for (let j = 0; j < outputs.length; j++){
-                    for (let k = 0; k < outputs[j].length; k++){
-                        outputs[j][k][i] = sample_out;
-                    }
-                }
-            }
-            return true;
-        }
-        */
         // Represents the length (in samples) of the fade-in of new audio buffers
         // that we receive from the APU
         static FADE_SAMPLES      = 200;
@@ -1341,7 +1228,7 @@ try{
             return true;
         }
     }
-    
+    // Actually register us to the context
     registerProcessor("AudioFader", AudioFader);
 }
 catch (e){}

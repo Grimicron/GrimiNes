@@ -154,6 +154,12 @@ button{
     z-index: 2;
 }
 
+@media (hover: hover){
+    #overlay-button{
+        display: none !important;
+    }
+}
+
 @font-face{
     font-family: "NES";
     src: url("nes.ttf");
@@ -177,6 +183,29 @@ p{
     z-index: 1;
 }
 
+#notification-container{
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    padding: min(3vw, .5em);
+    width: auto;
+    background-color: #101010;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: "NES";
+    color: #ffffff;
+    opacity: 0;
+    transition: opacity .3s ease-in-out;
+    z-index: 2;
+}
+
+#notification-container.showing{
+    opacity: 1;
+}
+
 #tactile-overlay{
     display: none;
     overflow-y: hidden;
@@ -187,11 +216,11 @@ p{
     left: 0px;
     width: 100%;
     height: 100%;
-    z-index: 1;
+    z-index: 3;
     opacity: 0;
     filter: blur(8px);
     transform: scale(2.0);
-    transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
+    transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .5s ease-in-out;
 }
 
 @media (hover:none){
@@ -199,7 +228,7 @@ p{
         opacity: 1;
         filter: blur(0px);
         transform: scale(1.0);
-        transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .7s ease-in-out;
+        transition: opacity .5s ease-in-out, filter .5s ease-in-out, transform .5s ease-in-out;
     }
 }
 

@@ -25,25 +25,7 @@ class NES{
         this.apu             = new APU       (this);
         this.mmap            = new MMAP      (this);
         this.logger          = new LOGGER    (this);
-        this.controller      = new CONTROLLER(this, {
-            a:      "KeyX"      ,
-            b:      "KeyZ"      ,
-            select: "Space"     ,
-            start:  "Enter"     ,
-            up:     "ArrowUp"   ,
-            down:   "ArrowDown" ,
-            left:   "ArrowLeft" ,
-            right:  "ArrowRight",
-        },{
-            a:       1,
-            b:       0,
-            select:  8,
-            start:   9,
-            up:     12,
-            down:   13,
-            left:   14,
-            right:  15,
-        }, "tactile-overlay");
+        this.controller      = new CONTROLLER(this);
         this.paused          = true;
         this.keep_logs       = false;
         this.prev_ts         = 0;
@@ -70,28 +52,8 @@ class NES{
         this.cpu_cycles_left = 0;
         this.ppu_cycles_left = 0;
         this.apu_cycles_left = 0;
-        this.ctx             = null;
-    }
-
-    init(p_ctx, rom){
-        this.ctx = p_ctx;
-        this.fps_display = document.getElementById("fps-counter");
-        this.prev_ts = window.performance.now() / 1000;
-        this.fps_update_ts = this.prev_ts;
-        this.controller.bind_kb();
-        this.controller.bind_gp();
-        this.controller.bind_bt();
-        this.mmap.load_rom(rom);
-        this.apu.init_sound();
-        this.ppu.init_buffers();
-        this.ppu.load_normal_palette();
-        this.cpu.reset();
-    }
-
-    destroy(){
-        // We only really need to destroy the audio pipeline and clear the canvas
-        this.apu.destroy_sound();
-        this.ctx.clearRect(0, 0, 256, 240);
+        this.video_ctx       = null;
+        this.audio_ctx       = null;
     }
 
     to_json(){
@@ -125,9 +87,42 @@ class NES{
         this.mmap.from_json(state.mmap);
         this.controller.from_json(state.controller);
     }
+    
+    init(p_ctx, rom, fps_display_id){
+        this.video_ctx = p_ctx;
+        this.audio_ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (fps_display_id != null) this.fps_display = document.getElementById(fps_display_id);
+        this.prev_ts = window.performance.now() / 1000;
+        this.fps_update_ts = this.prev_ts;
+        this.mmap.load_rom(rom);
+        this.apu.init_sound();
+        this.ppu.init_buffers();
+        this.ppu.load_normal_palette();
+        this.cpu.reset();
+    }
 
+    destroy(){
+        // We only really need to destroy the audio pipeline, clear the canvas,
+        // and unbind the controller listeners
+        this.apu.destroy_sound();
+        this.audio_ctx.close();
+        this.video_ctx.clearRect(0, 0, 256, 240);
+    }
+
+    // Despite this being just a proxy function between the caller and the controller,
+    // we want to keep the communication between the programmer and our internal components
+    // ideally to zero by using these kinds of functions, so as to not expose all of our
+    // internals, so that anyone can use this class
+    set_controller_binds(p_kb_binds, p_gp_binds, p_bt_container){
+        this.controller.set_binds(p_kb_binds, p_gp_binds, p_bt_container);
+        this.controller.bind_kb();
+        this.controller.bind_gp();
+        this.controller.bind_bt();
+    }
+    
     reset(){
         // Isn't exactly a true reset but is good enough
+        this.apu.destroy_sound();
         this.apu = new APU(this);
         this.ppu = new PPU(this);
         this.apu.init_sound();
@@ -137,7 +132,7 @@ class NES{
     }
     
     update_screen(){
-        this.ctx.putImageData(
+        this.video_ctx.putImageData(
             // cur_buf indicates the buffer we are WRITING to, not the one which
             // is finished, so we need to choose the opposite
             new ImageData(this.ppu.cur_buf ? this.ppu.bk_buf : this.ppu.fr_buf, 256, 240)
@@ -221,7 +216,7 @@ class NES{
 
     update_fps(now){
         let fps = Math.round(this.frame_count / (now - this.fps_update_ts));
-        this.fps_display.innerHTML = fps + " FPS";
+        if (this.fps_display != null) this.fps_display.innerHTML = fps + " FPS";
         this.fps_update_ts = now;
         this.frame_count = 0;
     }
