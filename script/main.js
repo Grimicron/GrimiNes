@@ -13,11 +13,11 @@ let overlay_button = null;
 let notification   = null;
 let fps_counter    = null;
 let canvas         = null;
-let ctx            = null;
 let fr             = null;
 let my_nes         = null;
 let bt_overlay     = null;
 let last_save      = null;
+let nes_inited     = false;
 
 // The NES automically handles the possibility of there being timing irregularities
 // in how often this function is called, so we can use the much less CPU intensive
@@ -45,7 +45,7 @@ function init_nes(rom){
     bt_overlay.style.display = "block";
     // Actually initialize the NES with the ROM and canvas context (it takes
     // care itself of the audio output)
-    my_nes.init(ctx, rom, "fps-counter");
+    my_nes.init(canvas, rom, "fps-counter");
     // We could allow the user to redefine the binds in the future, but we can
     // just hardcode them in for now
     my_nes.set_controller_binds({
@@ -77,6 +77,8 @@ function init_nes(rom){
 }
 
 function deinit_nes(){
+    // Allow the NES to be initialized again
+    nes_inited = false;
     // Basically do the opposite that we did in init, by showing the overflow
     // and showing/hiding the opposite elements
     document.body.setAttribute("style", "overflow-y: auto !important;");
@@ -111,6 +113,11 @@ function quick_load(name){
     req.overrideMimeType("text/plain");
     req.onload = () => {
         if (req.status != 200) return;
+        // If the user double clicked the quick load button, init_nes may be
+        // triggered twice, which can corrupt the state of the NES, so we prevent
+        // that with this check
+        if (nes_inited) return;
+        nes_inited = true;
         // Transparency transition which takes .5 seconds
         document.getElementById("game-container").classList.toggle("transitioning");
         setTimeout(() => {
@@ -178,13 +185,8 @@ document.addEventListener("DOMContentLoaded", () => {
     notification   = document.getElementById("notification-container");
     fps_counter    = document.getElementById("fps-counter");
     canvas         = document.getElementById("screen");
-    ctx            = canvas.getContext("2d");
     fr             = new FileReader();
     my_nes         = new NES();
-    // We don't want any anti-aliasing done by the browser to our canvas,
-    // we want to see the pixels perfectly distinct
-    ctx.imageSmoothingEnabled = false;
-    ctx.mozImageSmoothingEnabled = false;
     // Some browsers make 100vh not actually equal to the amount of vertical space
     // we have available, so we have to get that information ourselves and pass it
     // on to the stylesheet
@@ -207,9 +209,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // Action button bindings
     // There's not really much to say about these, the code pretty much
     // speaks for itself
-    rom_input.onchange = () => {
+    rom_input.onchange = (e) => {
 	    fr.readAsArrayBuffer(rom_input.files[0]);
         fr.onloadend = (e) => {
+            if (nes_inited) return;
+            nes_inited = true;
             document.getElementById("game-container").classList.toggle("transitioning");
             setTimeout(() => {
                 init_nes(new Uint8Array(fr.result));

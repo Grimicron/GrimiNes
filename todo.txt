@@ -1,12 +1,17 @@
 TODO:
-- Hide button overlay control
 - Hambuger menu for action buttons
 - Keybind info display
 - Volume on/off -> short circuit APU
 - Bigger ROM library (Gradius, Tetris/Tetris Gym, Ninja Gaiden, Kirby, SMB3...)
 - Add MMC3 mapper (mapper id #004) for Kirby & SMB3
+- Add Color Dreams mapper (mapper id #011)
+- Add DxROM mapper (mapper id #206)
+- Add NINA-003-006 mapper (mapper id #079)
 - Fix MMC1 mapper (mapper id #001) for Tetris & Ninja Gaiden
 - Fix APU tuning issues (The Legend of Zelda, SMB)
 - Performance optimization for Intel Atom (60fps stable)
 - Mobile fullscreen control
 - Fill out README.md
+
+Mapper data one-liner:
+curl -s https://nesdir.github.io | egrep "mapper" | awk '{freq[$0]++} END {for(e in freq){print freq[e],e}}' | sort -nr

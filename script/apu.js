@@ -5,15 +5,6 @@
 // https://www.nesdev.org/apu_ref.txt
 
 class APU{
-    static SAMPLE_RATE          = 44100.0;
-    // Determines the frequency at which audio buffers are
-    // sent to the fader to be mixed
-    static BUF_RELOAD_HZ        = 20;
-    // I would prefer to write NES.APU_CLOCK_HZ here
-    // instead writing the magic number, but NES is not
-    // defined at the time of defining this constant
-    static CYC_PER_SAMPLE       = 894887.0 / APU.SAMPLE_RATE;
-    static BUF_SIZE             = Math.round(APU.SAMPLE_RATE / APU.BUF_RELOAD_HZ);
     // Determines what value the length counter should be loaded in with when written to
     static LENGTH_COUNTER_TABLE = [
          10,
@@ -245,9 +236,14 @@ class APU{
         this.sample_counter     = 0.0;
         // Keeps track of which sample we are going to write in the put_sample() function
         this.sample_pos         = 0;
-        // Defines the global volume for the whole APU
-        // Should be able to be modified by the user in the future
-        this.volume             = 0.20;
+        // Defines the size of our audio buffer
+        // Calculated each time the audio settings are modified
+        this.buffer_size           = 0;
+        // Calculated each time the audio settings are modified
+        // Defines how many APU cycles need to be clocked in order to take 1
+        // sample of the current output
+        // Calculated each time the audio settings are modified
+        this.cyc_per_sample     = 0;
         // Our own custom AudioWorklet which stitches, mixes and fades the raw audio
         // buffers we send to it, the most essential part of the audio pipeline
         this.fader              = null;
@@ -319,7 +315,8 @@ class APU{
             interrupt_flags:    this.interrupt_flags,
             sample_counter:     this.sample_counter,
             sample_pos:         this.sample_pos,
-            volume:             this.volume,
+            buffer_size:        this.buffer_size,
+            cyc_per_sample:     this.cyc_per_sample,
         };
     }
     
@@ -385,7 +382,8 @@ class APU{
         this.interrupt_flags    = state.interrupt_flags    || 0;
         this.sample_counter     = state.sample_counter     || 0;
         this.sample_pos         = state.sample_pos         || 0;
-        this.volume             = state.volume             || 0;
+        this.buffer_size        = state.buffer_size        || 0;
+        this.cyc_per_sample     = state.cyc_per_sample     || 0;
     }
 
     // Audio pipeline:
@@ -412,6 +410,23 @@ class APU{
         document.addEventListener("blur"            , () => { pause_handler(); });
         document.addEventListener("visibilitychange", () => { pause_handler(); });
     }
+
+    update_constants(){
+        // Pretty self-explanatory equations, you can verify them just by looking
+        // at how the units (sample, Hz) interact and cancel out
+        this.buffer_size    = Math.round(this.nes.settings.audio.sample_rate / this.nes.settings.audio.buffer_out_hz);
+        this.cyc_per_sample = NES.APU_CLOCK_HZ / this.nes.settings.audio.sample_rate;
+        // We should also update the buffer with our new length
+        this.buffer         = new Float32Array(this.buffer_size);
+        // Finally notify the fader of these new constants, as well as the ones defined in the NES
+        this.fader.port.postMessage({
+            type: "settings_update",
+            mode: this.nes.settings.audio.buffer_mixing,
+            buffer_size: this.buffer_size,
+            fade_samples: this.nes.settings.audio.fade_samples,
+            loop_keep_samples: this.nes.settings.audio.loop_keep_samples,
+        });
+    }
     
     init_sound(){
         this.buffer                    = new Float32Array(APU.BUF_SIZE);
@@ -428,12 +443,14 @@ class APU{
         try{
             this.fader = new AudioWorkletNode(this.nes.audio_ctx, "AudioFader");
             this.init_pipeline();
+            this.update_constants();
         }
         // Register it if it hasn't already been registered
         catch(e){
             this.nes.audio_ctx.audioWorklet.addModule("/script/apu.js").then(() => {
                 this.fader = new AudioWorkletNode(this.nes.audio_ctx, "AudioFader");
                 this.init_pipeline();
+                this.update_constants();
             });
         }
     }
@@ -690,10 +707,10 @@ class APU{
         // that it's on
         let mix_out   = this.mix_sample(sq1_out, sq2_out, tri_out, noise_out, this.dmc_level);
         // Apply our own sort of mixer with volume
-        let final_out = mix_out * this.volume;
+        let final_out = mix_out * this.nes.settings.audio.volume;
         this.buffer[this.sample_pos] = mix_out;
         this.sample_pos++;
-        if (this.sample_pos >= APU.BUF_SIZE){
+        if (this.sample_pos >= this.buffer_size){
             // Send in our filled up buffer to the fader through the I/O port
             // We have to add the check to see if it's not null because since it's initialized
             // in a promise, at the beginning we may pass through here while it's not initialized yet
@@ -952,9 +969,9 @@ class APU{
         // we can just linearly add 1 to our sample counter and subtract
         // 20.29 everytime we add a sample to occassionally skip a cycle call
         // and do 20 instead of 21 to keep the ratio as exact as possible
-        if (this.sample_counter >= APU.CYC_PER_SAMPLE){
+        if (this.sample_counter >= this.cyc_per_sample){
             this.put_sample();
-            this.sample_counter -= APU.CYC_PER_SAMPLE;
+            this.sample_counter -= this.cyc_per_sample;
         }
         // We always increase the sample counter
         this.sample_counter++;
@@ -1044,26 +1061,46 @@ class APU{
 // AudioWorkletProcessor exists, however it automatically tries to declare this class
 // when the document is loaded, so we have to catch that error and ignore it
 try{
+    // AudioFader mixing diagram:
+    //                                                                            Pause state
+    //                                                                                 ║
+    // Audio pipeline ══╦═> Buffer playback ══╗          ╔════════════> Last sample    ║
+    // buffer stream    ║      cursor         ║          ║                   ║         ║
+    //                  ║                     ╠══> Current sample ══╗        ║         ║
+    //                  ║                     ║                     ║        ║         ║
+    //                  ╠═> Current buffer ═══╝                     ║        ║         ║
+    //                  ║         ║                                 ║        ║         ║
+    //                  ║         v                                 ║        ║         ║
+    //                  ║   Buffer smoother                         ║        ╚═════════╣
+    //                  ║         ║                                 ║                  ║
+    //                  ║         v                                 ╠══> Linear mixer ═╩═> Audio pipeline
+    //                  ║    Fade buffer ═════╗                     ║
+    //                  ║                     ║                     ║
+    //                  ║                     ╠══> Fade sample ═════╣
+    //                  ║                     ║                     ║
+    //                  ╠=> Fade playback ════╝                     ║
+    //                  ║       cursor                              ║
+    //                  ║                                           ║
+    //                  ║                                           ║
+    //                  ╚═>  Fade length ═══════════════════════════╝
+    //                        counter
     class AudioFader extends AudioWorkletProcessor{
-        // Represents the length (in samples) of the fade-in of new audio buffers
-        // that we receive from the APU
         static FADE_SAMPLES      = 200;
-        // Represents the number of samples we keep replaying while we wait for new
-        // samples to arrive, since replaying the whole buffer would sound very choppy,
-        // unresponsive, and would increase audio popping
-        // Has to be at least equal to or bigger than FADE_SAMPLES to prevent any popping
         static LOOP_KEEP_SAMPLES = 250;
 
         constructor(...args){
             super(...args);
-            // Start off our buffers with empty silence
+            // Defines what we should do with the buffers that arrive to us
+            // (none = no mixing, fade = our mixing architecture)
+            this.buffer_mixing_mode  = "none";
+            // Start off our buffers with just 1 sample to not cause any issues
             // Stores the audio buffer we are currently playing, and is
             // moved into the last_buf register once we are done playing it
             // (it is smoothed out for looping before that)
-            this.cur_buf             = new Float32Array(APU.BUF_SIZE);
+            this.cur_buf             = new Float32Array(1);
             // Is always designed to be played in a loop without any audio pops
             // and is also used to fade in the new buffers which come in
-            this.last_buf            = new Float32Array(APU.BUF_SIZE);
+            this.last_buf            = new Float32Array(1);
             // Represents how far along in our current audio buffer we are, and
             // isn't touched once we reach the end until we receive a new buffer
             this.cur_buf_cursor      = 0;
@@ -1079,6 +1116,12 @@ try{
             // Keeps the last sample we played to reduce audio popping when
             // we stop outputting new audio once we are paused
             this.last_sample         = 0.0;
+            // These last properties are simply mirrors of what we have in our
+            // NES and our APU, since we cant directly communicate with them
+            this.buffer_size         = 1;
+            // Explained in the declaration of settings in nes.js
+            this.fade_samples        = 1;
+            this.loop_keep_samples   = 1;
             // This is the only way we can communicate with our corresponding
             // AudioNode, so whenever we receive a message, we process what information
             // it is communicating to us and act accordingly
@@ -1096,6 +1139,19 @@ try{
                     // just set the pause state to what we are told
                     this.paused = e.data.paused;
                 }
+                else if (e.data.type == "settings_update"){
+                    // Just update the corresponding settings registers
+                    this.buffer_mixing_mode = e.data.mode;
+                    this.buffer_size        = e.data.buffer_size;
+                    this.fade_samples       = e.data.fade_samples;
+                    this.loop_keep_samples  = e.data.loop_keep_samples;
+                    // We should also update our buffers to be new size specified
+                    this.cur_buf            = new Float32Array(this.buffer_size);
+                    this.last_buf           = new Float32Array(this.buffer_size);
+                    // Also reset the cursors just in case
+                    this.cur_buf_cursor     = 0;
+                    this.last_buf_cursor    = 0;
+                }
             };
         }
 
@@ -1105,51 +1161,29 @@ try{
             // We make sure our new buffer is completely new, not a reference to the old buffer
             let smooth_buf = new Float32Array(buf);
             // We use basically the same formula that we use in produce_sample (see below)
-            for (let i = 0; i < AudioFader.FADE_SAMPLES; i++){
+            for (let i = 0; i < this.fade_samples; i++){
                 // We count backwards from the end of the buffer
-                let cur_sample   = buf[APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES + i];
-                let fade_sample  = buf[APU.BUF_SIZE - AudioFader.FADE_SAMPLES      + i];
-                let mixed_sample = (((AudioFader.FADE_SAMPLES - i) * fade_sample)
+                let cur_sample   = buf[this.buffer_size - this.loop_keep_samples + i];
+                let fade_sample  = buf[this.buffer_size - this.fade_samples      + i];
+                let mixed_sample = (((this.fade_samples - i) * fade_sample)
                                  +   (i                            * cur_sample ))
-                                 /    AudioFader.FADE_SAMPLES;
-                smooth_buf[APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES + i] = mixed_sample;
-                if (isNaN(mixed_sample)){
-                    console.log("NaN in smoothed buffer");
-                    console.log(buf);
-                    console.log(smooth_buf);
-                    console.log(i);
-                    console.log(cur_sample);
-                    console.log(fade_sample);
-                    console.log(AudioFader.LOOP_KEEP_SAMPLES);
-                    console.log(mixed_sample);
-                    throw new Error("NaN in smoothed buffer");
-                }
+                                 /    this.fade_samples;
+                smooth_buf[this.buffer_size - this.loop_keep_samples + i] = mixed_sample;
             }
             return smooth_buf;
         }
         
-        produce_sample(){
+        produce_fade_sample(){
             // We always produce and mix samples, the code managing our registers
             // automatically takes care of making sure that they are at values
             // which produce the desired results
             // We also use % to make sure we don't go out of bounds of the buffer's length
-            let cur_sample  = this.cur_buf[this.cur_buf_cursor   % APU.BUF_SIZE];
-            let fade_sample = this.last_buf[this.last_buf_cursor % APU.BUF_SIZE];
+            let cur_sample  = this.cur_buf[this.cur_buf_cursor   % this.buffer_size];
+            let fade_sample = this.last_buf[this.last_buf_cursor % this.buffer_size];
             // Scales according to the weight coefficients
-            let mix_out     = ((this.fade_length_counter                            * fade_sample)
-                            + ((AudioFader.FADE_SAMPLES - this.fade_length_counter) * cur_sample))
-                            /   AudioFader.FADE_SAMPLES;
-            if (isNaN(mix_out)){
-                console.log("fader mixer error. state:");
-                console.log(cur_sample);
-                console.log(fade_sample);
-                console.log(mix_out);
-                console.log(this.fade_length_counter);
-                console.log(this.cur_buf_cursor);
-                console.log(this.last_buf_cursor);
-                console.log(AudioFader.FADE_SAMPLES);
-                throw new Error();
-            }
+            let mix_out     = ((this.fade_length_counter                      * fade_sample)
+                            + ((this.fade_samples - this.fade_length_counter) * cur_sample))
+                            /   this.fade_samples;
             // Mixing formula:
             // LF + (T - L)C
             // -------------
@@ -1168,21 +1202,21 @@ try{
 
         // Executes a sample and returns its mixed value, while also handling the
         // internal register control logic with each pass
-        exec_sample(){
+        exec_fade_sample(){
             // We always calculate the mixer output, since the registers are setup
             // in such a way that the mixer always produces the desired samples
-            let mix_out = this.produce_sample();
+            let mix_out = this.produce_fade_sample();
             // Internal register control logic
             // Always increase the fade buffer playback cursor and make it loop if it
             // reaches the end of the buffer
             this.last_buf_cursor++;
-            if (this.last_buf_cursor >= APU.BUF_SIZE){
+            if (this.last_buf_cursor >= this.buffer_size){
                 // We reset it counting from the end of the buffer to LOOP_KEEP_SAMPLES
-                this.last_buf_cursor = APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES;
+                this.last_buf_cursor = this.buffer_size - this.loop_keep_samples;
             }
             // If we are still playing the new buffer normally, increase
             // the playback cursor and decrease the length counter if it's not 0
-            if (this.cur_buf_cursor < APU.BUF_SIZE){
+            if (this.cur_buf_cursor < this.buffer_size){
                 this.cur_buf_cursor++;
                 if (this.fade_length_counter) this.fade_length_counter--;
             }
@@ -1191,10 +1225,10 @@ try{
             // counter to max for it to start counting down when we receive
             // a new buffer, increas the cursor so that this event doesn't
             // repeat and reset the fade counter cursor
-            else if (this.cur_buf_cursor == APU.BUF_SIZE){
+            else if (this.cur_buf_cursor == this.buffer_size){
                 this.last_buf = this.smooth(this.cur_buf);
-                this.last_buf_cursor = APU.BUF_SIZE - AudioFader.LOOP_KEEP_SAMPLES;
-                this.fade_length_counter = AudioFader.FADE_SAMPLES;
+                this.last_buf_cursor = this.buffer_size - this.loop_keep_samples;
+                this.fade_length_counter = this.fade_samples;
                 this.cur_buf_cursor++;
             }
             // If we are paused, we override our output to the last sample we played to keep
@@ -1203,7 +1237,9 @@ try{
             // Update our last sample register
             this.last_sample = mix_out;
             // Return the mixed sample
-            return mix_out;
+            // Just in case there's been an internal error and the output is NaN,
+            // we return 0 instead as a last resort
+            return isNaN(mix_out) ? 0.0 : mix_out;
         }
         
         process(inputs, outputs, parameters){
@@ -1214,18 +1250,38 @@ try{
             if (!outputs        ) return;
             if (!(outputs[0])   ) return;
             if (!(outputs[0][0])) return;
-            // We assume the buffers for each channel of each output node are the same length
-            for (let i = 0; i < outputs[0][0].length; i++){
-                let mix_out = this.exec_sample();
-                // Output the sample to every channel of every output node
-                for (let j = 0; j < outputs.length; j++){
-                    for (let k = 0; k < outputs[0].length; k++){
-                        outputs[j][k][i] = mix_out;
+            // If our mixing mode is set to none, we just output whatever
+            // the current playback cursor is pointing at and increase it without
+            // going over the buffer length
+            if (this.buffer_mixing_mode == "none"){
+                for (let i = 0; i < outputs[0][0].length; i++){
+                    let out = this.cur_buf[this.cur_buf_cursor];
+                    this.cur_buf_cursor = Math.min(this.cur_buf_cursor + 1, this.buffer_size - 1);
+                    for (let j = 0; j < outputs.length; j++){
+                        for (let k = 0; k < outputs[j].length; k++){
+                            outputs[j][k][i] = out;
+                        }
                     }
                 }
+                // We don't want to go into the fade mixing code
+                return true;
             }
-            // Inform our node the operation was completed successfully
-            return true;
+            else if (this.buffer_mixing_mode == "fade"){
+                // We assume the buffers for each channel of each output node are the same length
+                for (let i = 0; i < outputs[0][0].length; i++){
+                    let mix_out = this.exec_fade_sample();
+                    // Output the sample to every channel of every output node
+                    for (let j = 0; j < outputs.length; j++){
+                        for (let k = 0; k < outputs[0].length; k++){
+                            outputs[j][k][i] = mix_out;
+                        }
+                    }
+                }
+                // Inform our node the operation was completed successfully
+                return true;
+            }
+            // Mode not recognized
+            return false;
         }
     }
     // Actually register us to the context

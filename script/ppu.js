@@ -788,6 +788,28 @@ class PPU{
         // Now is a good a time as any to move our current scanline's sprite
         // buffer to the buffer which will be displayed on the next scanline
         this.prev_spr_buf = spr_buf;
+        // Calculate the brightness scalars here because they remain the same for
+        // the entire scanline
+        let emph_scalars = [1.0, 1.0, 1.0];
+        // Color emphasis
+        // Red emphasis
+        if (this.reg_mask & 0x20){
+            emph_scalars[0] += PPU.EMPH_FACT;
+            emph_scalars[1] -= PPU.EMPH_FACT;
+            emph_scalars[2] -= PPU.EMPH_FACT;
+        }
+        // Green emphasis
+        if (this.reg_mask & 0x40){
+            emph_scalars[0] -= PPU.EMPH_FACT;
+            emph_scalars[1] += PPU.EMPH_FACT;
+            emph_scalars[2] -= PPU.EMPH_FACT;
+        }
+        // Blue emphasis
+        if (this.reg_mask & 0x80){
+            emph_scalars[0] -= PPU.EMPH_FACT;
+            emph_scalars[1] -= PPU.EMPH_FACT;
+            emph_scalars[2] += PPU.EMPH_FACT;
+        }
         // Finally display scanline output
         for (let i = 0; i < 256; i++){
             // We don't want to keep accessing mux_buf[i],
@@ -800,33 +822,9 @@ class PPU{
             let raw_c = [];
             // We have to declare raw_c like this because otherwise we will
             // modify the actual palette color, not the copy of the color in raw_c
-            raw_c[0] = this.palette[col_i][0];
-            raw_c[1] = this.palette[col_i][1];
-            raw_c[2] = this.palette[col_i][2];
-            // Color emphasis only applied to color with low nibble 0-D,
-            // that is to say, every color except blacks (with 0x0D and
-            // 0x1D blacks being the exception, theyre evil)
-            if ((col_i & 0x0F) < 0x0E){
-                // Apply color emphasis
-                // Red emphasis
-                if (this.reg_mask & 0x20){
-                    raw_c[0] = Math.min(raw_c[0] * PPU.EMPH_FACT, 0xFF);
-                    raw_c[1] = Math.max(raw_c[1] / PPU.EMPH_FACT, 0x00);
-                    raw_c[2] = Math.max(raw_c[2] / PPU.EMPH_FACT, 0x00);
-                }
-                // Green emphasis
-                if (this.reg_mask & 0x40){
-                    raw_c[0] = Math.max(raw_c[0] / PPU.EMPH_FACT, 0x00);
-                    raw_c[1] = Math.min(raw_c[1] * PPU.EMPH_FACT, 0xFF);
-                    raw_c[2] = Math.max(raw_c[2] / PPU.EMPH_FACT, 0x00);
-                }
-                // Blue emphasis
-                if (this.reg_mask & 0x80){
-                    raw_c[0] = Math.max(raw_c[0] / PPU.EMPH_FACT, 0x00);
-                    raw_c[1] = Math.max(raw_c[1] / PPU.EMPH_FACT, 0x00);
-                    raw_c[2] = Math.min(raw_c[2] * PPU.EMPH_FACT, 0xFF);
-                }
-            }
+            raw_c[0] = this.palette[col_i][0] * emph_scalars[0];
+            raw_c[1] = this.palette[col_i][1] * emph_scalars[1];
+            raw_c[2] = this.palette[col_i][2] * emph_scalars[2];
             // We don't do this in a separate function call
             // because it's pretty performance heavy
             let buf_pos = (this.scanline * 256 + i) * 4;
